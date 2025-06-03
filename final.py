@@ -43,8 +43,8 @@ DEFAULT_CONFIG = {
     "single_prob": {"1": -1, "2": -1, "3": -1, "4": -1, "5": -1, "6": -1, "7": -1},
     "droplist_prob": {"1": [2, 1, 1]},
     "multiple_prob": {"3": [10, 20, 40, 50, 50], "4": [10, 20, 40, 50, 50]},
-    "min_selection": {"3": 1, "4": 2},  # 新增：多选题最小选择数量
-    "max_selection": {"3": 3, "4": 5},  # 新增：最大选择数量
+    "min_selection": {"3": 1, "4": 2},
+    "max_selection": {"3": 3, "4": 5},
     "matrix_prob": {"1": [1, 0, 0, 0, 0], "2": -1, "3": [1, 0, 0, 0, 0],
                     "4": [1, 0, 0, 0, 0], "5": [1, 0, 0, 0, 0], "6": [1, 0, 0, 0, 0]},
     "scale_prob": {"7": [0, 2, 3, 4, 1], "12": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]},
@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
                      "跨学科研究与学习科学深化"],
               "12": ["巧用AI工具解放重复劳动", "动态反馈激活课堂参与", "轻量化VR/AR增强认知具象化"]},
     "texts_prob": {"11": [1, 1, 1, 1], "12": [1, 1, 1]},
-    "multiple_other": {  # 新增多选题"其他"选项答案
+    "multiple_other": {
         "3": ["其他原因1", "其他原因2", "其他原因3"],
         "4": ["补充说明1", "补充说明2"]
     },
@@ -76,9 +76,6 @@ DEFAULT_CONFIG = {
     }
 }
 
-
-# =============================================
-
 class WJXAutoFillApp:
     def __init__(self, root):
         self.root = root
@@ -101,30 +98,36 @@ class WJXAutoFillApp:
         self.cur_fail = 0
         self.lock = threading.Lock()
         self.pause_event = threading.Event()
-        self.droplist_entries = []
+
+        # 初始化输入框列表
+        self.single_entries = []
         self.multi_entries = []
         self.droplist_entries = []
         self.scale_entries = []
-        self.multi_other_entries = []  # 新增：存储多选题"其他"选项的输入框
-        self.min_selection_entries = []  # 新增：存储多选题最小选择数量的输入框
+        self.multi_other_entries = []
+        self.min_selection_entries = []
+        self.matrix_entries = []
+        self.text_entries = []
+        self.multiple_text_entries = []
+        self.reorder_entries = []
 
         # 字体设置
         self.font_family = tk.StringVar()
         self.font_size = tk.IntVar()
         self.font_family.set("Arial")
-        self.font_size.set(10)  # 确保初始值有效
+        self.font_size.set(10)
 
-        # 创建主框架 - 使用PanedWindow实现可调整区域
+        # 创建主框架
         self.main_paned = ttk.PanedWindow(root, orient=tk.VERTICAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # 上半部分：控制区域和标签页
         self.top_frame = ttk.Frame(self.main_paned)
-        self.main_paned.add(self.top_frame, weight=1)  # 可扩展
+        self.main_paned.add(self.top_frame, weight=1)
 
         # 下半部分：日志区域
         self.log_frame = ttk.LabelFrame(self.main_paned, text="运行日志")
-        self.main_paned.add(self.log_frame, weight=0)  # 固定高度
+        self.main_paned.add(self.log_frame, weight=0)
 
         # === 添加控制按钮区域（顶部）===
         self.control_frame = ttk.Frame(self.top_frame)
@@ -149,33 +152,31 @@ class WJXAutoFillApp:
         self.import_config_btn = ttk.Button(top_btn_frame, text="导入配置", command=self.import_config)
         self.import_config_btn.pack(side=tk.LEFT, padx=5)
 
-        # 第二行状态信息
-        bottom_info_frame = ttk.Frame(self.control_frame)
-        bottom_info_frame.pack(fill=tk.X, pady=(5, 0))
+        # 状态栏
+        status_frame = ttk.Frame(self.control_frame)
+        status_frame.pack(fill=tk.X, pady=(5, 0))
 
-        self.status_var = tk.StringVar()
-        self.status_var.set("就绪")
-        self.status_label = ttk.Label(bottom_info_frame, textvariable=self.status_var)
+        self.status_var = tk.StringVar(value="就绪")
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var)
         self.status_label.pack(side=tk.RIGHT, padx=5)
 
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(bottom_info_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
 
         # 题目进度
         self.question_progress_var = tk.DoubleVar()
-        self.question_progress_bar = ttk.Progressbar(bottom_info_frame,
-                                                     variable=self.question_progress_var,
-                                                     maximum=100,
-                                                     length=200)
+        self.question_progress_bar = ttk.Progressbar(status_frame,
+                                                   variable=self.question_progress_var,
+                                                   maximum=100,
+                                                   length=200)
         self.question_progress_bar.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
 
-        self.question_status_var = tk.StringVar()
-        self.question_status_var.set("题目进度: 0/0")
-        self.question_status_label = ttk.Label(bottom_info_frame, textvariable=self.question_status_var)
+        self.question_status_var = tk.StringVar(value="题目进度: 0/0")
+        self.question_status_label = ttk.Label(status_frame, textvariable=self.question_status_var)
         self.question_status_label.pack(side=tk.RIGHT, padx=5)
 
-        # === 创建标签页 ===
+        # 创建标签页
         self.notebook = ttk.Notebook(self.top_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -208,8 +209,22 @@ class WJXAutoFillApp:
         self.question_frame = self.scrollable_frame
         self.create_question_settings()
 
-        # === 日志区域 ===
-        # 在日志区域上方添加按钮
+        # 创建日志区域
+        self.create_log_area()
+
+        # 设置日志系统
+        self.setup_logging()
+
+        # 绑定字体更新事件
+        self.font_family.trace_add("write", self.update_font)
+        self.font_size.trace_add("write", self.update_font)
+
+        # 初始化字体
+        self.update_font()
+
+    def create_log_area(self):
+        """创建日志区域"""
+        # 日志控制按钮
         log_control_frame = ttk.Frame(self.log_frame)
         log_control_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
 
@@ -219,55 +234,38 @@ class WJXAutoFillApp:
         self.export_log_btn = ttk.Button(log_control_frame, text="导出日志", command=self.export_log)
         self.export_log_btn.pack(side=tk.LEFT, padx=5)
 
+        # 日志文本区域
         self.log_area = scrolledtext.ScrolledText(self.log_frame, height=10)
         self.log_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.log_area.config(state=tk.DISABLED)
 
-        # 重定向日志输出
-        self.redirect_logging()
+    def setup_logging(self):
+        """配置日志系统"""
 
-        # 绑定字体和字体大小变化事件
-        self.font_family.trace_add("write", self.update_font)
-        self.font_size.trace_add("write", self.update_font)
+        class TextHandler(logging.Handler):
+            def __init__(self, text_widget):
+                super().__init__()
+                self.text_widget = text_widget
 
-        # 初始化字体
-        self.update_font()
+            def emit(self, record):
+                msg = self.format(record)
 
-    def update_font(self, *args):
-        # 创建新字体
-        font_family = self.font_family.get()
-        try:
-            font_size = self.font_size.get()
-        except tk.TclError:
-            font_size = 10  # 默认值
+                def append():
+                    self.text_widget.configure(state='normal')
+                    self.text_widget.insert(tk.END, msg + '\n')
+                    self.text_widget.configure(state='disabled')
+                    self.text_widget.see(tk.END)
 
-        new_font = (font_family, font_size)
+                self.text_widget.after(0, append)
 
-        # 更新ttk样式
-        style = ttk.Style()
-        style.configure(".", font=new_font)
+        handler = TextHandler(self.log_area)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
+                                      datefmt='%Y-%m-%d %H:%M:%S')
+        handler.setFormatter(formatter)
 
-        # 特殊处理滚动文本框
-        self.log_area.configure(font=new_font)
-
-        # 递归更新所有子组件
-        def update_widget_font(widget):
-            try:
-                # 更新标准tk组件
-                if hasattr(widget, 'configure') and 'font' in widget.configure():
-                    widget.configure(font=new_font)
-
-                # 递归更新子组件
-                for child in widget.winfo_children():
-                    update_widget_font(child)
-            except Exception as e:
-                # 忽略不支持字体设置的组件
-                pass
-
-        update_widget_font(self.root)
-
-        # 更新日志区域的字体
-        self.log_area.configure(font=new_font)
+        logger = logging.getLogger()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
     def create_global_settings(self):
         """创建全局设置界面"""
@@ -283,7 +281,7 @@ class WJXAutoFillApp:
         ttk.Label(frame, text="字体大小:").grid(row=0, column=2, padx=padx, pady=pady, sticky=tk.W)
         font_size_spinbox = ttk.Spinbox(frame, from_=8, to=24, increment=1, textvariable=self.font_size)
         font_size_spinbox.grid(row=0, column=3, padx=padx, pady=pady, sticky=tk.W)
-        font_size_spinbox.set(10)  # 确保初始值有效
+        font_size_spinbox.set(10)
 
         # 问卷链接
         ttk.Label(frame, text="问卷链接:").grid(row=1, column=0, padx=padx, pady=pady, sticky=tk.W)
@@ -343,8 +341,8 @@ class WJXAutoFillApp:
 
         # IP设置
         self.use_ip_var = tk.BooleanVar(value=self.config["use_ip"])
-        ttk.Checkbutton(frame, text="使用代理IP", variable=self.use_ip_var).grid(row=7, column=0, padx=padx, pady=pady,
-                                                                                 sticky=tk.W)
+        ttk.Checkbutton(frame, text="使用代理IP", variable=self.use_ip_var).grid(
+            row=7, column=0, padx=padx, pady=pady, sticky=tk.W)
         ttk.Label(frame, text="IP API:").grid(row=7, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.ip_entry = ttk.Entry(frame, width=40)
         self.ip_entry.grid(row=7, column=2, columnspan=3, padx=padx, pady=pady, sticky=tk.EW)
@@ -352,64 +350,21 @@ class WJXAutoFillApp:
 
         # 无头模式
         self.headless_var = tk.BooleanVar(value=self.config["headless"])
-        ttk.Checkbutton(frame, text="无头模式(不显示浏览器)", variable=self.headless_var).grid(row=8, column=0,
-                                                                                               padx=padx, pady=pady,
-                                                                                               sticky=tk.W)
+        ttk.Checkbutton(frame, text="无头模式(不显示浏览器)", variable=self.headless_var).grid(
+            row=8, column=0, padx=padx, pady=pady, sticky=tk.W)
 
-        # 添加按钮组
+        # 按钮组
         button_frame = ttk.Frame(frame)
         button_frame.grid(row=9, column=0, columnspan=5, pady=10, sticky=tk.W)
 
-        # 添加解析问卷按钮
+        # 解析问卷按钮
         ttk.Button(button_frame, text="解析问卷", command=self.parse_survey).grid(row=0, column=0, padx=5)
 
-        # 添加重置默认按钮
+        # 重置默认按钮
         ttk.Button(button_frame, text="重置默认", command=self.reset_defaults).grid(row=0, column=1, padx=5)
 
-        # 添加填充空间
-        for i in range(10):
-            frame.rowconfigure(i, weight=1)
-        for j in range(5):
-            frame.columnconfigure(j, weight=1)
-
-    # 在 WJXAutoFillApp 类中添加 reset_defaults 方法
-    def reset_defaults(self):
-        """重置所有设置为默认值"""
-        if messagebox.askyesno("确认", "确定要重置所有设置为默认值吗？"):
-            # 重置配置字典
-            self.config = DEFAULT_CONFIG.copy()
-
-            # 更新全局设置界面
-            self.url_entry.delete(0, tk.END)
-            self.url_entry.insert(0, self.config["url"])
-
-            self.target_entry.set(self.config["target_num"])
-
-            self.ratio_scale.set(self.config["weixin_ratio"])
-            self.ratio_var.set(f"{self.config['weixin_ratio'] * 100:.0f}%")
-
-            self.min_duration.set(self.config["min_duration"])
-            self.max_duration.set(self.config["max_duration"])
-
-            self.min_delay.set(self.config["min_delay"])
-            self.max_delay.set(self.config["max_delay"])
-
-            self.submit_delay.set(self.config["submit_delay"])
-
-            self.num_threads.set(self.config["num_threads"])
-
-            self.use_ip_var.set(self.config["use_ip"])
-            self.headless_var.set(self.config["headless"])
-
-            self.ip_entry.delete(0, tk.END)
-            self.ip_entry.insert(0, self.config["ip_api"])
-
-            # 重新加载题型设置界面
-            self.reload_question_settings()
-
-            logging.info("已重置为默认配置")
-
     def create_question_settings(self):
+        """创建题型设置界面"""
         # 初始化所有题型的输入框列表
         self.single_entries = []
         self.multi_entries = []
@@ -419,8 +374,8 @@ class WJXAutoFillApp:
         self.reorder_entries = []
         self.droplist_entries = []
         self.scale_entries = []
-        self.multi_other_entries = []  # 新增：存储多选题"其他"选项的输入框
-        self.min_selection_entries = []  # 新增：存储多选题最小选择数量的输入框
+        self.multi_other_entries = []
+        self.min_selection_entries = []
 
         # 使用Notebook组织不同题型
         self.question_notebook = ttk.Notebook(self.question_frame)
@@ -432,7 +387,7 @@ class WJXAutoFillApp:
             self.question_notebook.add(self.single_frame, text=f"单选题({len(self.config['single_prob'])})")
             self.create_single_settings(self.single_frame)
 
-        # 多选题设置 - 新增"其他"选项设置和最小选择数量设置
+        # 多选题设置
         if self.config["multiple_prob"]:
             self.multi_frame = ttk.Frame(self.question_notebook)
             self.question_notebook.add(self.multi_frame, text=f"多选题({len(self.config['multiple_prob'])})")
@@ -475,76 +430,81 @@ class WJXAutoFillApp:
             self.create_scale_settings(self.scale_frame)
 
     def create_single_settings(self, frame):
+        """创建单选题设置"""
         padx, pady = 5, 3
         self.single_entries = []
+
+        # 添加全随机按钮
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=0, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
+        ttk.Button(btn_frame, text="全部随机",
+                   command=lambda: self.set_all_random("single", frame)).pack(side=tk.LEFT, padx=5)
+
+        # 说明标签
+        ttk.Label(frame, text="设置每个选项的概率（-1表示随机选择）").grid(
+            row=1, column=0, columnspan=6, padx=padx, pady=pady, sticky=tk.W)
+
         for q_num, probs in self.config["single_prob"].items():
             row = len(self.single_entries) + 3
             ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
-            # 获取实际选项数量
-            if probs == -1:
-                option_count = 5  # 如果未配置，默认显示5个
-            elif isinstance(probs, list):
-                option_count = len(probs)  # 使用配置中的选项数量
-            else:
-                option_count = 5  # 默认
-
+            option_count = 5 if probs == -1 else len(probs) if isinstance(probs, list) else 5
             entry_row = []
+
             for col in range(1, option_count + 1):
                 entry = ttk.Entry(frame, width=8)
-                # 设置默认值
                 if probs == -1:
                     entry.insert(0, -1)
                 elif isinstance(probs, list) and col <= len(probs):
                     entry.insert(0, probs[col - 1])
                 else:
-                    entry.insert(0, "")  # 空值
+                    entry.insert(0, "")
                 entry.grid(row=row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
             self.single_entries.append(entry_row)
 
     def create_multi_settings(self, frame):
+        """创建多选题设置"""
         padx, pady = 5, 3
         self.multi_entries = []
-        self.multi_other_entries = []  # 初始化"其他"选项输入框列表
-        self.min_selection_entries = []  # 初始化最小选择数量输入框列表
+        self.multi_other_entries = []
+        self.min_selection_entries = []
 
         # 说明标签
-        ttk.Label(frame, text="设置每个多选题各选项被选择的概率（0-100之间的数值）").grid(row=1, column=0, columnspan=8,
-                                                                                        padx=padx, pady=pady,
-                                                                                        sticky=tk.W)
-        # 新增"其他"选项说明
-        ttk.Label(frame, text="其他选项答案（多个用逗号分隔）").grid(row=1, column=8, padx=padx, pady=pady, sticky=tk.W)
-        # 新增最小选择数量说明
-        ttk.Label(frame, text="最小选择数量").grid(row=1, column=9, padx=padx, pady=pady, sticky=tk.W)
+        ttk.Label(frame, text="设置每个多选题各选项被选择的概率（0-100之间的数值）").grid(
+            row=1, column=0, columnspan=8, padx=padx, pady=pady, sticky=tk.W)
+        ttk.Label(frame, text="其他选项答案（多个用逗号分隔）").grid(
+            row=1, column=8, padx=padx, pady=pady, sticky=tk.W)
+        ttk.Label(frame, text="最小选择数量").grid(
+            row=1, column=9, padx=padx, pady=pady, sticky=tk.W)
 
-        # 动态生成表头（根据配置中的最大选项数）
+        # 表头
         max_options = max(len(probs) for probs in self.config["multiple_prob"].values()) or 5
         headers = ["题号"] + [f"选项{i + 1}" for i in range(max_options)] + ["其他答案", "最小选择数"]
         for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=2, column=col, padx=padx, pady=pady)
+            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(
+                row=2, column=col, padx=padx, pady=pady)
 
-        # 遍历多选题配置，动态生成列数
+        # 创建多选题设置行
         for i, (q_num, probs) in enumerate(self.config["multiple_prob"].items()):
             row = i + 3
             ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
             entry_row = []
-            # 获取实际选项数量
             option_count = len(probs) if isinstance(probs, list) else 5
+
             for col in range(1, option_count + 1):
                 entry = ttk.Entry(frame, width=8)
                 if isinstance(probs, list) and col <= len(probs):
                     entry.insert(0, probs[col - 1])
                 else:
-                    entry.insert(0, 50)  # 默认概率
+                    entry.insert(0, 50)
                 entry.grid(row=row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
             self.multi_entries.append(entry_row)
 
             # 添加"其他"选项输入框
             other_entry = ttk.Entry(frame, width=25)
-            # 设置默认值（如果有）
             if q_num in self.config["multiple_other"]:
                 other_text = ", ".join(self.config["multiple_other"][q_num])
                 other_entry.insert(0, other_text)
@@ -553,51 +513,36 @@ class WJXAutoFillApp:
 
             # 添加最小选择数量输入框
             min_selection_entry = ttk.Spinbox(frame, from_=1, to=10, width=5)
-            # 设置默认值（如果有）
             if q_num in self.config["min_selection"]:
                 min_selection_entry.set(self.config["min_selection"][q_num])
             else:
-                min_selection_entry.set(1)  # 默认最小选择1个
+                min_selection_entry.set(1)
             min_selection_entry.grid(row=row, column=option_count + 2, padx=padx, pady=pady)
             self.min_selection_entries.append(min_selection_entry)
 
     def create_matrix_settings(self, frame):
-        """创建矩阵题设置界面"""
+        """创建矩阵题设置"""
         padx, pady = 5, 3
+        self.matrix_entries = []
+
+        # 说明标签
+        ttk.Label(frame, text="设置矩阵题每行选项的概率（-1表示随机选择）").grid(
+            row=0, column=0, columnspan=6, padx=padx, pady=pady, sticky=tk.W)
 
         # 添加全随机按钮
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
-
+        btn_frame.grid(row=1, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
         ttk.Button(btn_frame, text="全部随机",
                    command=lambda: self.set_all_random("matrix", frame)).pack(side=tk.LEFT, padx=5)
 
-        # 说明标签
-        ttk.Label(frame, text="设置矩阵题每个小题的选项概率（-1表示随机，[1,2]表示1:2比例）").grid(row=1, column=0,
-                                                                                                columnspan=6, padx=padx,
-                                                                                                pady=pady, sticky=tk.W)
-
-        # 创建表格
-        headers = ["小题号", "选项1", "选项2", "选项3", "选项4", "选项5"]
-        for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=2, column=col, padx=padx, pady=pady)
-
-        # 添加矩阵题设置行
-        self.matrix_entries = []
         for i, (q_num, probs) in enumerate(self.config["matrix_prob"].items()):
-            row = i + 3
-            ttk.Label(frame, text=f"小题{q_num}").grid(row=row, column=0, padx=padx, pady=pady)
-
-            # 获取实际选项数量
-            if probs == -1:
-                option_count = 5
-            elif isinstance(probs, list):
-                option_count = len(probs)
-            else:
-                option_count = 5
+            row = i + 2
+            ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
             entry_row = []
-            for col in range(1, min(6, option_count + 1)):
+            option_count = len(probs) if isinstance(probs, list) else 5
+
+            for col in range(1, option_count + 1):
                 entry = ttk.Entry(frame, width=8)
                 if probs == -1:
                     entry.insert(0, -1)
@@ -610,1049 +555,979 @@ class WJXAutoFillApp:
             self.matrix_entries.append(entry_row)
 
     def create_text_settings(self, frame):
+        """创建填空题设置"""
         padx, pady = 5, 3
-        # 说明标签
-        ttk.Label(frame, text="设置填空题的备选答案和选择概率（题号需与问卷一致）").grid(row=0, column=0, columnspan=9,
-                                                                                       padx=padx, pady=pady,
-                                                                                       sticky=tk.W)
-
-        # 表头
-        headers = ["题号", "答案1", "概率", "答案2", "概率", "答案3", "概率", "答案4", "概率"]
-        for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=1, column=col, padx=padx, pady=pady)
-
-        # 添加填空题设置行
         self.text_entries = []
-        for i, (q_num, answers) in enumerate(self.config["texts"].items()):
-            row = i + 2
-            # 题号输入框
-            q_num_entry = ttk.Entry(frame, width=5)
-            q_num_entry.insert(0, q_num)
-            q_num_entry.grid(row=row, column=0, padx=padx, pady=pady)
 
-            entry_row = [q_num_entry]
+        # 说明标签
+        ttk.Label(frame, text="设置填空题可选答案（多个答案用逗号分隔）").grid(
+            row=0, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.W)
 
-            # 获取概率配置
-            probs = self.config["texts_prob"].get(q_num, [1] * len(answers))
-            if len(probs) < len(answers):
-                probs = probs + [1] * (len(answers) - len(probs))
+        for i, (q_num, texts) in enumerate(self.config["texts"].items()):
+            row = i + 1
+            ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
-            # 答案和概率输入框
-            for j in range(min(4, len(answers))):  # 最多显示4个答案
-                # 答案输入框
-                answer_entry = ttk.Entry(frame, width=15)
-                answer_entry.insert(0, answers[j])
-                answer_entry.grid(row=row, column=1 + j * 2, padx=padx, pady=pady)
-                entry_row.append(answer_entry)
-
-                # 概率输入框
-                prob_entry = ttk.Entry(frame, width=5)
-                prob_value = probs[j] if j < len(probs) else 1
-                prob_entry.insert(0, prob_value)
-                prob_entry.grid(row=row, column=2 + j * 2, padx=padx, pady=pady)
-                entry_row.append(prob_entry)
-
-            # 如果答案不足4个，添加空输入框
-            for j in range(len(answers), 4):
-                # 空答案输入框
-                answer_entry = ttk.Entry(frame, width=15)
-                answer_entry.grid(row=row, column=1 + j * 2, padx=padx, pady=pady)
-                entry_row.append(answer_entry)
-
-                # 空概率输入框
-                prob_entry = ttk.Entry(frame, width=5)
-                prob_entry.grid(row=row, column=2 + j * 2, padx=padx, pady=pady)
-                entry_row.append(prob_entry)
-
-            self.text_entries.append(entry_row)
+            entry = ttk.Entry(frame, width=60)
+            entry.insert(0, ", ".join(texts))
+            entry.grid(row=row, column=1, padx=padx, pady=pady, sticky=tk.EW)
+            self.text_entries.append(entry)
 
     def create_multiple_text_settings(self, frame):
-        """创建多项填空设置界面"""
+        """创建多项填空设置"""
         padx, pady = 5, 3
-        # 说明标签
-        ttk.Label(frame, text="设置多项填空每个部分的备选答案和选择概率").grid(row=0, column=0, columnspan=9,
-                                                                               padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加多项填空设置行
         self.multiple_text_entries = []
-        for i, (q_num, parts) in enumerate(self.config["multiple_texts"].items()):
-            # 题号标签
-            ttk.Label(frame, text=f"题号: {q_num}", font=("Arial", 9, "bold")).grid(row=i * 5 + 1, column=0,
-                                                                                    columnspan=9,
-                                                                                    padx=padx, pady=10, sticky=tk.W)
 
-            # 获取该题的概率配置
-            prob_config = self.config["multiple_texts_prob"].get(q_num, [])
-            if len(prob_config) < len(parts):
-                prob_config = prob_config + [[1.0]] * (len(parts) - len(prob_config))
+        # 说明标签
+        ttk.Label(frame, text="设置每道多项填空题的可选答案（每行答案用逗号分隔）").grid(
+            row=0, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.W)
 
-            for part_idx, part in enumerate(parts):
-                # 部分标签
-                ttk.Label(frame, text=f"部分 {part_idx + 1}:").grid(row=i * 5 + 2 + part_idx, column=0, padx=padx,
-                                                                    pady=pady, sticky=tk.W)
+        row = 1
+        for q_num, text_lists in self.config["multiple_texts"].items():
+            ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
-                entry_row = []
-                part_probs = prob_config[part_idx] if part_idx < len(prob_config) else [1.0] * len(part)
+            entry_col = []
+            for i, texts in enumerate(text_lists):
+                entry = ttk.Entry(frame, width=60)
+                entry.insert(0, ", ".join(texts))
+                entry.grid(row=row + i, column=1, padx=padx, pady=pady, sticky=tk.EW)
+                entry_col.append(entry)
 
-                # 答案和概率输入框
-                for j in range(min(3, len(part))):  # 最多显示3个答案
-                    # 答案输入框
-                    answer_entry = ttk.Entry(frame, width=15)
-                    answer_entry.insert(0, part[j])
-                    answer_entry.grid(row=i * 5 + 2 + part_idx, column=1 + j * 3, padx=padx, pady=pady)
-                    entry_row.append(answer_entry)
-
-                    # 概率输入框
-                    prob_entry = ttk.Entry(frame, width=5)
-                    prob_value = part_probs[j] if j < len(part_probs) else 1.0
-                    prob_entry.insert(0, prob_value)
-                    prob_entry.grid(row=i * 5 + 2 + part_idx, column=2 + j * 3, padx=padx, pady=pady)
-                    entry_row.append(prob_entry)
-
-                # 如果答案不足3个，添加空输入框
-                for j in range(len(part), 3):
-                    # 空答案输入框
-                    answer_entry = ttk.Entry(frame, width=15)
-                    answer_entry.grid(row=i * 5 + 2 + part_idx, column=1 + j * 3, padx=padx, pady=pady)
-                    entry_row.append(answer_entry)
-
-                    # 空概率输入框
-                    prob_entry = ttk.Entry(frame, width=5)
-                    prob_entry.grid(row=i * 5 + 2 + part_idx, column=2 + j * 3, padx=padx, pady=pady)
-                    entry_row.append(prob_entry)
-
-                self.multiple_text_entries.append(entry_row)
+            self.multiple_text_entries.append(entry_col)
+            row += len(text_lists) + 1
 
     def create_reorder_settings(self, frame):
-        """创建排序题设置界面"""
+        """创建排序题设置"""
         padx, pady = 5, 3
-
-        # 添加全随机按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
-
-        ttk.Button(btn_frame, text="全部平均概率",
-                   command=lambda: self.set_all_random("reorder", frame)).pack(side=tk.LEFT, padx=5)
+        self.reorder_entries = []
 
         # 说明标签
-        ttk.Label(frame, text="设置排序题各位置的概率（0-1之间的数值）").grid(row=1, column=0, columnspan=6,
-                                                                            padx=padx, pady=pady, sticky=tk.W)
+        ttk.Label(frame, text="设置排序题每个位置的概率分布（数值和为1）").grid(
+            row=0, column=0, columnspan=6, padx=padx, pady=pady, sticky=tk.W)
 
-        # 创建表格
-        headers = ["题号", "位置1", "位置2", "位置3", "位置4", "位置5"]
-        for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=2, column=col, padx=padx, pady=pady)
-
-        # 添加排序题设置行
-        self.reorder_entries = []
         for i, (q_num, probs) in enumerate(self.config["reorder_prob"].items()):
-            row = i + 3
+            row = i + 1
             ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
             entry_row = []
-            # 根据位置数量创建输入框
-            position_count = len(probs) if isinstance(probs, list) else 4
-
-            for col in range(1, min(6, position_count + 1)):
+            for col, prob in enumerate(probs, 1):
                 entry = ttk.Entry(frame, width=8)
-                if isinstance(probs, list) and col <= len(probs):
-                    entry.insert(0, probs[col - 1])
-                else:
-                    entry.insert(0, 0.25)  # 默认概率
+                entry.insert(0, prob)
                 entry.grid(row=row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
             self.reorder_entries.append(entry_row)
 
     def create_droplist_settings(self, frame):
-        """创建下拉框设置界面"""
+        """创建下拉框设置"""
         padx, pady = 5, 3
-
-        # 添加全随机按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
-
-        ttk.Button(btn_frame, text="全部平均概率",
-                   command=lambda: self.set_all_random("droplist", frame)).pack(side=tk.LEFT, padx=5)
+        self.droplist_entries = []
 
         # 说明标签
-        ttk.Label(frame, text="设置下拉框题各选项的概率（0-1之间的数值）").grid(row=1, column=0, columnspan=6,
-                                                                              padx=padx, pady=pady,
-                                                                              sticky=tk.W)
-
-        # 动态生成表头
-        max_options = max(len(probs) for probs in self.config["droplist_prob"].values()) or 5
-        headers = ["题号"] + [f"选项{i + 1}" for i in range(max_options)]
-        for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=2, column=col, padx=padx, pady=pady)
+        ttk.Label(frame, text="设置下拉框各选项的选择概率").grid(
+            row=0, column=0, columnspan=6, padx=padx, pady=pady, sticky=tk.W)
 
         for i, (q_num, probs) in enumerate(self.config["droplist_prob"].items()):
-            row = i + 3
+            row = i + 1
             ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
             entry_row = []
-            option_count = len(probs) if isinstance(probs, list) else 5  # 动态获取数量
-            for col in range(1, option_count + 1):  # 直接使用实际数量
+            for col, prob in enumerate(probs, 1):
                 entry = ttk.Entry(frame, width=8)
-                if isinstance(probs, list) and col <= len(probs):
-                    entry.insert(0, probs[col - 1])
-                else:
-                    entry.insert(0, 0.2)  # 默认概率
+                entry.insert(0, prob)
                 entry.grid(row=row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
             self.droplist_entries.append(entry_row)
 
     def create_scale_settings(self, frame):
-        """创建量表题设置界面"""
+        """创建量表题设置"""
         padx, pady = 5, 3
-
-        # 添加全随机按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, columnspan=6, pady=(0, 5), sticky=tk.W)
-
-        ttk.Button(btn_frame, text="全部平均概率",
-                   command=lambda: self.set_all_random("scale", frame)).pack(side=tk.LEFT, padx=5)
+        self.scale_entries = []
 
         # 说明标签
-        ttk.Label(frame, text="设置量表题各选项的概率（0-1之间的数值）").grid(row=1, column=0, columnspan=6,
-                                                                            padx=padx, pady=pady,
-                                                                            sticky=tk.W)
-
-        # 动态生成表头
-        max_options = max(len(probs) for probs in self.config["scale_prob"].values()) or 5
-        headers = ["题号"] + [f"选项{i + 1}" for i in range(max_options)]
-        for col, header in enumerate(headers):
-            ttk.Label(frame, text=header, font=("Arial", 9, "bold")).grid(row=2, column=col, padx=padx, pady=pady)
+        ttk.Label(frame, text="设置量表题各选项的选择概率").grid(
+            row=0, column=0, columnspan=12, padx=padx, pady=pady, sticky=tk.W)
 
         for i, (q_num, probs) in enumerate(self.config["scale_prob"].items()):
-            row = i + 3
+            row = i + 1
             ttk.Label(frame, text=f"第{q_num}题").grid(row=row, column=0, padx=padx, pady=pady)
 
             entry_row = []
-            option_count = len(probs) if isinstance(probs, list) else 5  # 动态获取数量
-            for col in range(1, option_count + 1):  # 直接使用实际数量
+            for col, prob in enumerate(probs, 1):
                 entry = ttk.Entry(frame, width=8)
-                if isinstance(probs, list) and col <= len(probs):
-                    entry.insert(0, probs[col - 1])
-                else:
-                    entry.insert(0, 0.2)  # 默认概率
+                entry.insert(0, prob)
                 entry.grid(row=row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
             self.scale_entries.append(entry_row)
 
-    def set_all_random(self, q_type, frame):
-        """设置当前题型所有题目为随机"""
-        if q_type == "single":
-            for entry_row in self.single_entries:
-                for entry in entry_row:
-                    entry.delete(0, tk.END)
-                    entry.insert(0, "-1")
-            messagebox.showinfo("成功", "所有单选题已设置为随机选择")
-
-        elif q_type == "multi":
-            for entry_row in self.multi_entries:
-                for i, entry in enumerate(entry_row):
-                    entry.delete(0, tk.END)
-                    entry.insert(0, "50")
-            messagebox.showinfo("成功", "所有多选题选项概率已设置为50%")
-
-        elif q_type == "matrix":
-            for entry_row in self.matrix_entries:
-                for entry in entry_row:
-                    entry.delete(0, tk.END)
-                    entry.insert(0, "-1")
-            messagebox.showinfo("成功", "所有矩阵题已设置为随机选择")
-
-        elif q_type == "droplist":
-            for entry_row in self.droplist_entries:
-                for entry in entry_row:
-                    entry.delete(0, tk.END)
-                    # 计算平均概率
-                    avg_prob = 1.0 / len(entry_row)
-                    entry.insert(0, f"{avg_prob:.2f}")
-            messagebox.showinfo("成功", "所有下拉框选项概率已设置为平均概率")
-
-        elif q_type == "scale":
-            for entry_row in self.scale_entries:
-                for entry in entry_row:
-                    entry.delete(0, tk.END)
-                    # 计算平均概率
-                    avg_prob = 1.0 / len(entry_row)
-                    entry.insert(0, f"{avg_prob:.2f}")
-            messagebox.showinfo("成功", "所有量表题选项概率已设置为平均概率")
-
-        elif q_type == "reorder":
-            for entry_row in self.reorder_entries:
-                for entry in entry_row:
-                    entry.delete(0, tk.END)
-                    # 计算平均概率
-                    avg_prob = 1.0 / len(entry_row)
-                    entry.insert(0, f"{avg_prob:.2f}")
-            messagebox.showinfo("成功", "所有排序题位置概率已设置为平均概率")
-
-    def detect(self, driver: webdriver.Chrome) -> List[int]:
-        """检测问卷页数和题量"""
+    def save_config(self):
+        """保存当前配置"""
         try:
-            q_list = []
-            # 更健壮的页面检测方法
-            pages = driver.find_elements(By.XPATH, '//fieldset[contains(@id, "fieldset")]')
-            page_num = len(pages)
+            # 保存全局设置
+            self.config["url"] = self.url_entry.get().strip()
+            self.config["target_num"] = int(self.target_entry.get())
+            self.config["weixin_ratio"] = float(self.ratio_scale.get())
+            self.config["min_duration"] = int(self.min_duration.get())
+            self.config["max_duration"] = int(self.max_duration.get())
+            self.config["min_delay"] = float(self.min_delay.get())
+            self.config["max_delay"] = float(self.max_delay.get())
+            self.config["submit_delay"] = int(self.submit_delay.get())
+            self.config["num_threads"] = int(self.num_threads.get())
+            self.config["use_ip"] = self.use_ip_var.get()
+            self.config["headless"] = self.headless_var.get()
+            self.config["ip_api"] = self.ip_entry.get().strip()
 
-            for i in range(1, page_num + 1):
-                # 使用更通用的选择器
-                questions = driver.find_elements(By.XPATH, f'//fieldset[@id="fieldset{i}"]/div[contains(@id, "div")]')
-                valid_count = 0
-                for question in questions:
-                    # 检查元素是否可见
-                    if question.is_displayed():
-                        valid_count += 1
-                q_list.append(valid_count)
-            return q_list
+            # 保存单选题设置
+            for i, entries in enumerate(self.single_entries):
+                q_num = list(self.config["single_prob"].keys())[i]
+                probs = []
+                for entry in entries:
+                    try:
+                        value = float(entry.get())
+                        if value == -1:
+                            self.config["single_prob"][q_num] = -1
+                            break
+                        probs.append(value)
+                    except ValueError:
+                        continue
+                if probs and -1 not in probs:
+                    self.config["single_prob"][q_num] = probs
+
+            # 保存多选题设置
+            self.config["multiple_prob"] = {}
+            self.config["multiple_other"] = {}
+            self.config["min_selection"] = {}
+            for i, (entries, other_entry, min_entry) in enumerate(zip(
+                    self.multi_entries, self.multi_other_entries, self.min_selection_entries)):
+                q_num = list(self.config["multiple_prob"].keys())[i]
+                probs = []
+                for entry in entries:
+                    try:
+                        value = float(entry.get())
+                        probs.append(value)
+                    except ValueError:
+                        continue
+                if probs:
+                    self.config["multiple_prob"][q_num] = probs
+
+                # 保存其他选项答案
+                other_text = other_entry.get().strip()
+                if other_text:
+                    other_answers = [ans.strip() for ans in other_text.split(",")]
+                    self.config["multiple_other"][q_num] = other_answers
+
+                # 保存最小选择数量
+                try:
+                    min_selection = int(min_entry.get())
+                    self.config["min_selection"][q_num] = min_selection
+                except ValueError:
+                    pass
+
+            # 保存矩阵题设置
+            for i, entries in enumerate(self.matrix_entries):
+                q_num = list(self.config["matrix_prob"].keys())[i]
+                probs = []
+                for entry in entries:
+                    try:
+                        value = float(entry.get())
+                        if value == -1:
+                            self.config["matrix_prob"][q_num] = -1
+                            break
+                        probs.append(value)
+                    except ValueError:
+                        continue
+                if probs and -1 not in probs:
+                    self.config["matrix_prob"][q_num] = probs
+
+            # 保存填空题设置
+            self.config["texts"] = {}
+            for i, entry in enumerate(self.text_entries):
+                q_num = list(self.config["texts"].keys())[i]
+                text = entry.get().strip()
+                if text:
+                    texts = [t.strip() for t in text.split(",")]
+                    self.config["texts"][q_num] = texts
+
+            # 保存多项填空设置
+            self.config["multiple_texts"] = {}
+            self.config["multiple_texts_prob"] = {}
+            for i, entries in enumerate(self.multiple_text_entries):
+                q_num = list(self.config["multiple_texts"].keys())[i]
+                text_lists = []
+                prob_lists = []
+                for entry in entries:
+                    texts = [t.strip() for t in entry.get().strip().split(",")]
+                    if texts:
+                        text_lists.append(texts)
+                        # 为每个答案设置相等概率
+                        probs = [1 / len(texts)] * len(texts)
+                        prob_lists.append(probs)
+                if text_lists:
+                    self.config["multiple_texts"][q_num] = text_lists
+                    self.config["multiple_texts_prob"][q_num] = prob_lists
+
+            # 保存排序题设置
+            for i, entries in enumerate(self.reorder_entries):
+                q_num = list(self.config["reorder_prob"].keys())[i]
+                probs = []
+                for entry in entries:
+                    try:
+                        value = float(entry.get())
+                        probs.append(value)
+                    except ValueError:
+                        continue
+                if probs:
+                    self.config["reorder_prob"][q_num] = probs
+
+            return True
         except Exception as e:
-            logging.error(f"检测问卷结构时出错: {str(e)}")
-            return [0]
+            logging.error(f"保存配置时出错: {str(e)}")
+            messagebox.showerror("错误", f"保存配置时出错: {str(e)}")
+            return False
 
-    def get_question_type_name(self, q_type: int) -> str:
-        """获取题型名称"""
-        type_names = {
-            1: "填空题",
-            2: "填空题",
-            3: "单选题",
-            4: "多选题",
-            5: "量表题",
-            6: "矩阵题",
-            7: "下拉框",
-            8: "滑块题",
-            11: "排序题"
-        }
-        return type_names.get(q_type, f"未知题型({q_type})")
-
-    def parse_survey(self):
-        """解析问卷结构并生成配置模板"""
-        # 先保存当前配置
+    def export_config(self):
+        """导出配置到文件"""
         if not self.save_config():
             return
 
         try:
-            logging.info("开始解析问卷结构...")
-            self.status_var.set("正在解析问卷...")
-            self.root.update()
-
-            # 创建浏览器实例
-            option = webdriver.ChromeOptions()
-            option.add_argument('--headless')  # 无头模式
-            option.add_argument('--disable-gpu')
-            option.add_argument('--no-sandbox')
-            option.add_argument('--disable-dev-shm-usage')
-            option.add_experimental_option("excludeSwitches", ["enable-automation"])
-            option.add_argument('--disable-blink-features=AutomationControlled')
-
-            driver = webdriver.Chrome(options=option)
-            driver.get(self.config["url"])
-
-            # 等待问卷加载
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.ID, "divQuestion"))
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                initialfile="wjx_config.json"
             )
-            time.sleep(3)  # 额外等待
-
-            # 初始化解析结果
-            parsed_config = {
-                "single_prob": {},
-                "droplist_prob": {},
-                "multiple_prob": {},
-                "min_selection": {},  # 新增：最小选择数量
-                "matrix_prob": {},
-                "scale_prob": {},
-                "texts": {},
-                "texts_prob": {},
-                "multiple_texts": {},
-                "multiple_texts_prob": {},
-                "reorder_prob": {},
-                "multiple_other": {}  # 新增：多选题"其他"选项
-            }
-
-            # 检测问卷页数和题量
-            q_list = self.detect(driver)  # 检测页数和每一页的题量
-            if not q_list or sum(q_list) == 0:
-                logging.error("未检测到题目")
-                return False
-            total_questions = sum(q_list)  # 总题目数
-            current_question = 0  # 当前题号
-            single_num = 0  # 第num个单选题
-            vacant_num = 0  # 第num个填空题
-            multiple_text_num = 0  # 第num个多项填空题
-            droplist_num = 0  # 第num个下拉框题
-            multiple_num = 0  # 第num个多选题
-            matrix_num = 0  # 第num个矩阵小题
-            scale_num = 0  # 第num个量表题
-            reorder_num = 0  # 第num个排序题
-            current = 0  # 题号
-
-            # 记录开始时间（用于控制作答时长）
-            start_time = time.time()
-
-            for j in q_list:  # 遍历每一页
-                # 添加页面开始前的延迟
-                self.random_delay(*self.config["per_page_delay"])
-                for k in range(1, j + 1):  # 遍历该页的每一题
-                    current += 1
-                    current_question += 1
-                    # 更新题目进度条
-                    progress = (current_question / total_questions) * 100
-                    self.question_progress_var.set(progress)
-                    self.question_status_var.set(f"题目进度: {current_question}/{total_questions}")
-                    # 强制GUI刷新
-                    self.root.update_idletasks()
-
-                    try:
-                        # 获取题型 - 使用更健壮的定位方式
-                        q_element = driver.find_element(By.XPATH, f'//div[contains(@id, "div{current}") and @topic]')
-                        q_type = q_element.get_attribute("type")
-
-                        if not q_type:
-                            continue
-
-                        q_type = int(q_type)
-
-                        if q_type == 1 or q_type == 2:  # 填空题
-                            # 检查是否多项填空
-                            input_elements = q_element.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-                            if len(input_elements) > 1:
-                                self.fill_multiple_text(driver, current, multiple_text_num)
-                                multiple_text_num += 1
-                            else:
-                                self.fill_text(driver, current)
-                                vacant_num += 1
-                        elif q_type == 3:  # 单选题
-                            self.fill_single(driver, current, single_num)
-                            single_num += 1
-                        elif q_type == 4:  # 多选题
-                            self.fill_multiple(driver, current, multiple_num)
-                            multiple_num += 1
-                        elif q_type == 5:  # 量表题
-                            self.fill_scale(driver, current, scale_num)
-                            scale_num += 1
-                        elif q_type == 6:  # 矩阵题
-                            matrix_num = self.fill_matrix(driver, current, matrix_num)
-                        elif q_type == 7:  # 下拉框
-                            self.fill_droplist(driver, current, droplist_num)
-                            droplist_num += 1
-                        elif q_type == 8:  # 滑块题
-                            self.fill_slider(driver, current)
-                        elif q_type == 11:  # 排序题
-                            self.fill_reorder(driver, current, reorder_num)
-                            reorder_num += 1
-                        else:
-                            logging.warning(f"第{current}题为不支持题型: {q_type}")
-                    except Exception as e:
-                        logging.error(f"填写第{current}题时出错: {str(e)}")
-                        traceback.print_exc()
-
-            # 计算已经花费的时间
-            elapsed_time = time.time() - start_time
-            total_duration = random.uniform(self.config["min_duration"], self.config["max_duration"])
-
-            # 如果已经花费的时间小于随机停留时间，则等待剩余时间
-            if elapsed_time < total_duration:
-                time.sleep(total_duration - elapsed_time)
-
-            # 提交问卷
-            self.submit_survey(driver)
-
-            # 提交后延迟
-            time.sleep(self.config["submit_delay"])
-            return True
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.config, f, ensure_ascii=False, indent=4)
+                logging.info(f"配置已导出到: {file_path}")
+                messagebox.showinfo("成功", "配置导出成功！")
         except Exception as e:
-            logging.error(f"填写问卷时出错: {str(e)}")
-            traceback.print_exc()
-            return False
+            logging.error(f"导出配置时出错: {str(e)}")
+            messagebox.showerror("错误", f"导出配置时出错: {str(e)}")
 
-    def fill_text(self, driver: webdriver.Chrome, current: int):
+    def import_config(self):
+        """从文件导入配置"""
         try:
-            q_key = str(current)
-            if q_key in self.config["texts"]:
-                answers = self.config["texts"][q_key]
-                probs = self.config["texts_prob"][q_key]
-                # 修复：使用 probs 作为概率参数
-                selected_idx = np.random.choice(len(answers), p=probs)
-                content = answers[selected_idx]
-                driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys(content)
-            else:
-                driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys("已填写")
-            self.random_delay(*self.config["per_question_delay"])
+            file_path = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    new_config = json.load(f)
+
+                # 验证配置有效性
+                required_keys = ["url", "target_num", "min_duration", "max_duration",
+                                 "weixin_ratio", "min_delay", "max_delay", "submit_delay"]
+                for key in required_keys:
+                    if key not in new_config:
+                        raise ValueError(f"配置文件缺少必需的字段: {key}")
+
+                self.config = new_config
+                self.reset_ui_with_config()
+                logging.info(f"配置已从文件导入: {file_path}")
+                messagebox.showinfo("成功", "配置导入成功！")
         except Exception as e:
-            logging.error(f"填写填空题 {current} 时出错: {str(e)}")
+            logging.error(f"导入配置时出错: {str(e)}")
+            messagebox.showerror("错误", f"导入配置时出错: {str(e)}")
 
-    def fill_multiple_text(self, driver: webdriver.Chrome, current: int, index: int):
-        """填写多项填空题"""
+    def reset_defaults(self):
+        """重置为默认配置"""
+        if messagebox.askyesno("确认", "确定要重置所有设置为默认值吗？"):
+            self.config = DEFAULT_CONFIG.copy()
+            self.reset_ui_with_config()
+            logging.info("已重置为默认配置")
+
+    def reset_ui_with_config(self):
+        """根据当前配置重置UI"""
+        # 重置全局设置
+        self.url_entry.delete(0, tk.END)
+        self.url_entry.insert(0, self.config["url"])
+
+        self.target_entry.delete(0, tk.END)
+        self.target_entry.insert(0, str(self.config["target_num"]))
+
+        self.ratio_scale.set(self.config["weixin_ratio"])
+
+        self.min_duration.delete(0, tk.END)
+        self.min_duration.insert(0, str(self.config["min_duration"]))
+
+        self.max_duration.delete(0, tk.END)
+        self.max_duration.insert(0, str(self.config["max_duration"]))
+
+        self.min_delay.delete(0, tk.END)
+        self.min_delay.insert(0, str(self.config["min_delay"]))
+
+        self.max_delay.delete(0, tk.END)
+        self.max_delay.insert(0, str(self.config["max_delay"]))
+
+        self.submit_delay.delete(0, tk.END)
+        self.submit_delay.insert(0, str(self.config["submit_delay"]))
+
+        self.num_threads.delete(0, tk.END)
+        self.num_threads.insert(0, str(self.config["num_threads"]))
+
+        self.use_ip_var.set(self.config["use_ip"])
+        self.headless_var.set(self.config["headless"])
+
+        self.ip_entry.delete(0, tk.END)
+        self.ip_entry.insert(0, self.config["ip_api"])
+
+        # 重新创建题型设置
+        for widget in self.question_frame.winfo_children():
+            widget.destroy()
+        self.create_question_settings()
+
+    def clear_log(self):
+        """清空日志"""
+        self.log_area.config(state=tk.NORMAL)
+        self.log_area.delete(1.0, tk.END)
+        self.log_area.config(state=tk.DISABLED)
+        logging.info("日志已清空")
+
+    def export_log(self):
+        """导出日志"""
         try:
-            q_key = str(current)
-            if q_key in self.config["multiple_texts"]:
-                parts = self.config["multiple_texts"][q_key]
-                probs = self.config["multiple_texts_prob"][q_key]
-
-                # 获取所有输入框
-                input_elements = driver.find_elements(By.CSS_SELECTOR,
-                                                      f"#div{current} input[type='text'], #div{current} textarea")
-
-                # 为每个部分填写内容
-                for i in range(len(input_elements)):
-                    if i < len(parts) and i < len(probs):
-                        answers = parts[i]
-                        part_probs = probs[i]
-
-                        # 确保概率列表长度与答案一致
-                        if len(part_probs) < len(answers):
-                            part_probs = part_probs + [1.0] * (len(answers) - len(part_probs))
-                        elif len(part_probs) > len(answers):
-                            part_probs = part_probs[:len(answers)]
-
-                        # 归一化概率
-                        total = sum(part_probs)
-                        if total > 0:
-                            normalized_probs = [p / total for p in part_probs]
-                        else:
-                            normalized_probs = [1.0 / len(answers)] * len(answers)
-
-                        # 选择答案
-                        selected_idx = np.random.choice(len(answers), p=normalized_probs)
-                        content = answers[selected_idx]
-                        input_elements[i].send_keys(content)
-                    else:
-                        input_elements[i].send_keys("已填写")
-            else:
-                # 默认填写
-                input_elements = driver.find_elements(By.CSS_SELECTOR,
-                                                      f"#div{current} input[type='text'], #div{current} textarea")
-                for input_element in input_elements:
-                    input_element.send_keys("已填写")
-
-            self.random_delay(*self.config["per_question_delay"])
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                initialfile="wjx_log.txt"
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(self.log_area.get(1.0, tk.END))
+                logging.info(f"日志已导出到: {file_path}")
+                messagebox.showinfo("成功", "日志导出成功！")
         except Exception as e:
-            logging.error(f"填写多项填空题 {current} 时出错: {str(e)}")
+            logging.error(f"导出日志时出错: {str(e)}")
+            messagebox.showerror("错误", f"导出日志时出错: {str(e)}")
 
-    def fill_single(self, driver: webdriver.Chrome, current: int, index: int):
+    def update_font(self, *args):
+        """更新UI字体"""
         try:
-            # 获取题目元素
-            q_element = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
+            font_family = self.font_family.get()
+            font_size = self.font_size.get()
+            new_font = (font_family, font_size)
+            style = ttk.Style()
+            style.configure(".", font=new_font)
+            self.log_area.configure(font=new_font)
 
-            # 获取所有选项元素
-            options = driver.find_elements(By.CSS_SELECTOR, f"#div{current} .ui-radio")
-            if not options:
-                return
-
-            q_key = str(current)
-            p_config = self.config["single_prob"].get(q_key, -1)
-
-            # 处理概率配置
-            if p_config == -1:  # 完全随机
-                probabilities = [1 / len(options)] * len(options)
-            elif isinstance(p_config, list) and len(p_config) == len(options):
-                # 归一化概率
-                total = sum(p_config)
-                probabilities = [x / total for x in p_config]
-            else:
-                probabilities = [1 / len(options)] * len(options)
-
-            # 按概率选择选项
-            selected_index = np.random.choice(len(options), p=probabilities)
-            selected_option = options[selected_index]
-
-            # 点击选中选项
-            selected_option.click()
-
-            # 增强的"其他"选项处理
-            try:
-                # 获取选项文本
-                option_text = selected_option.find_element(By.CLASS_NAME, "label").text.lower()
-
-                # 检查是否是"其他"选项
-                if "其他" in option_text or "else" in option_text or "other" in option_text:
-                    # 更健壮的定位方式：在题目区域内查找所有文本输入框
-                    input_fields = q_element.find_elements(By.XPATH, ".//textarea | .//input[@type='text']")
-
-                    if input_fields:
-                        # 只填写第一个找到的输入框（通常是关联的）
-                        input_field = input_fields[0]
-
-                        # 确保输入框可见且可编辑
-                        if input_field.is_displayed() and input_field.is_enabled():
-                            # 清空现有内容
-                            input_field.clear()
-
-                            # 生成随机答案
-                            other_answers = [
-                                "其他原因", "特殊情况说明", "自定义补充",
-                                "其他考虑因素", "其他说明内容"
-                            ]
-                            answer = random.choice(other_answers)
-                            input_field.send_keys(answer)
-            except NoSuchElementException:
-                pass  # 不是"其他"选项
-            except Exception as e:
-                logging.warning(f"处理'其他'选项时出错: {str(e)}")
-
-            self.random_delay(*self.config["per_question_delay"])
-        except Exception as e:
-            logging.error(f"填写单选题 {current} 时出错: {str(e)}")
-
-    def fill_multiple(self, driver: webdriver.Chrome, current: int, index: int):
-        """填写多选题 - 增强其他选项处理"""
-        try:
-            # 获取题目元素
-            q_element = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
-
-            # 获取所有选项元素
-            options = driver.find_elements(By.CSS_SELECTOR, f"#div{current} .ui-checkbox")
-            if not options:
-                return
-
-            q_key = str(current)
-            p = self.config["multiple_prob"].get(q_key, [50] * len(options))
-            min_selection = self.config["min_selection"].get(q_key, 1)  # 获取最小选择数量
-
-            # 确保最小选择数量不超过选项总数
-            min_selection = min(min_selection, len(options))
-
-            # 确保概率列表长度与选项一致
-            p = p + [50] * (len(options) - len(p)) if len(p) < len(options) else p[:len(options)]
-
-            selected = []
-            # 先确保至少选择 min_selection 个选项
-            for i in range(min_selection):
-                # 找出尚未被选中的选项
-                unselected_indices = [idx for idx in range(len(options)) if idx not in selected]
-                if not unselected_indices:
-                    break
-
-                # 计算未被选中选项的权重
-                weights = [p[idx] for idx in unselected_indices]
-                total_weight = sum(weights)
-                if total_weight <= 0:
-                    # 如果所有权重都小于等于0，则随机选择一个
-                    selected_idx = random.choice(unselected_indices)
-                else:
-                    # 归一化权重
-                    normalized_weights = [w / total_weight for w in weights]
-                    selected_idx = np.random.choice(unselected_indices, p=normalized_weights)
-                selected.append(selected_idx)
-
-            # 随机选择其他选项
-            for i in range(len(options)):
-                if i in selected:
-                    continue  # 已经选中
-                if random.random() < p[i] / 100.0:
-                    selected.append(i)
-
-            # 点击选中的选项并处理其他选项
-            other_selected = False
-            for idx in selected:
-                if idx < len(options):
-                    # 点击选项 - 使用更健壮的方式
-                    try:
-                        # 先滚动到元素
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                              options[idx])
-                        time.sleep(0.2)
-
-                        # 尝试普通点击
-                        try:
-                            options[idx].click()
-                        except (ElementNotInteractableException, ElementClickInterceptedException):
-                            # 如果普通点击失败，使用JavaScript点击
-                            driver.execute_script("arguments[0].click();", options[idx])
-                    except Exception as e:
-                        logging.warning(f"点击选项时出错: {str(e)}")
-
-                    # 检查是否是"其他"选项
-                    try:
-                        option_text = options[idx].find_element(By.CLASS_NAME, "label").text.lower()
-                        if "其他" in option_text or "else" in option_text or "other" in option_text:
-                            other_selected = True
-                            # 尝试定位关联的输入框
-                            try:
-                                # 在选项元素内查找
-                                input_fields = options[idx].find_elements(By.XPATH,
-                                                                          ".//following-sibling::textarea | .//following-sibling::input[@type='text']")
-                                if not input_fields:
-                                    # 在父元素内查找
-                                    parent = options[idx].find_element(By.XPATH, "./..")
-                                    input_fields = parent.find_elements(By.CSS_SELECTOR, "textarea, input[type='text']")
-
-                                if input_fields:
-                                    input_field = input_fields[0]
-                                    if input_field.is_displayed() and input_field.is_enabled():
-                                        # 填写其他选项
-                                        if q_key in self.config["multiple_other"] and self.config["multiple_other"][
-                                            q_key]:
-                                            other_text = random.choice(self.config["multiple_other"][q_key])
-                                            input_field.clear()
-                                            # 模拟真实输入
-                                            for char in other_text:
-                                                input_field.send_keys(char)
-                                                time.sleep(random.uniform(0.05, 0.15))
-                                        else:
-                                            input_field.send_keys("其他")
-                            except Exception as e:
-                                logging.warning(f"填写其他选项时出错: {str(e)}")
-                    except Exception as e:
-                        logging.debug(f"检查选项文本时出错: {str(e)}")
-                        pass
-
-            # 如果其他选项被选中但未填写，尝试全局查找
-            if other_selected:
+            def update_widget_font(widget):
                 try:
-                    input_fields = q_element.find_elements(By.CSS_SELECTOR, "textarea, input[type='text']")
-                    for input_field in input_fields:
-                        if input_field.is_displayed() and input_field.is_enabled():
-                            # 填写其他选项
-                            if q_key in self.config["multiple_other"] and self.config["multiple_other"][q_key]:
-                                other_text = random.choice(self.config["multiple_other"][q_key])
-                                input_field.clear()
-                                # 模拟真实输入
-                                for char in other_text:
-                                    input_field.send_keys(char)
-                                    time.sleep(random.uniform(0.05, 0.15))
-                            else:
-                                input_field.send_keys("其他")
-                except Exception as e:
-                    logging.warning(f"全局查找其他输入框时出错: {str(e)}")
+                    if hasattr(widget, 'configure') and 'font' in widget.configure():
+                        widget.configure(font=new_font)
+                    for child in widget.winfo_children():
+                        update_widget_font(child)
+                except Exception:
+                    pass
 
-            self.random_delay(*self.config["per_question_delay"])
+            update_widget_font(self.root)
         except Exception as e:
-            logging.error(f"填写多选题 {current} 时出错: {str(e)}")
-            traceback.print_exc()
+            logging.error(f"更新字体时出错: {str(e)}")
 
-    def fill_matrix(self, driver: webdriver.Chrome, current: int, index: int) -> int:
-        """填写矩阵题"""
+    def parse_survey(self):
+        """解析问卷"""
         try:
-            # 获取矩阵的行
-            rows = driver.find_elements(By.XPATH, f'//tr[contains(@id, "drv{current}")]')
-            if not rows:
-                return index
-
-            q_num = len(rows)
-            # 遍历每一道小题
-            for i in range(1, q_num + 1):
-                if index < len(self.config["matrix_prob"]):
-                    p = self.config["matrix_prob"][index]
-                    index += 1
-                else:
-                    p = -1
-
-                # 获取当前小题的列
-                cols = driver.find_elements(By.XPATH, f'//*[@id="drv{current}_{i}"]/td')
-                if not cols:
-                    continue
-
-                col_num = len(cols) - 1  # 减去题号列
-
-                if p == -1:  # 随机选择
-                    opt = random.randint(2, col_num + 1)
-                elif isinstance(p, list) and len(p) == col_num:  # 按概率选择
-                    opt = np.random.choice(a=np.arange(2, col_num + 2), p=p)
-                else:  # 默认随机
-                    opt = random.randint(2, col_num + 1)
-
-                try:
-                    # 先滚动到元素
-                    element = driver.find_element(By.CSS_SELECTOR, f"#drv{current}_{i} > td:nth-child({opt})")
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                          element)
-                    time.sleep(0.2)
-
-                    try:
-                        element.click()
-                    except (ElementNotInteractableException, ElementClickInterceptedException):
-                        driver.execute_script("arguments[0].click();", element)
-                except Exception as e:
-                    logging.error(f"点击矩阵选项时出错: {str(e)}")
-
-            self.random_delay(*self.config["per_question_delay"])
-            return index
-        except Exception as e:
-            logging.error(f"填写矩阵题 {current} 时出错: {str(e)}")
-            return index
-
-    def fill_droplist(self, driver: webdriver.Chrome, current: int, index: int):
-        """填写下拉框题"""
-        try:
-            # 点击下拉框
-            container = driver.find_element(By.CSS_SELECTOR, f"#select2-q{current}-container")
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", container)
-            container.click()
-            time.sleep(0.5)
-
-            # 获取选项
-            options = driver.find_elements(By.XPATH, f"//ul[@id='select2-q{current}-results']/li")
-            if not options:
+            url = self.url_entry.get().strip()
+            if not url:
+                messagebox.showerror("错误", "请输入问卷链接")
                 return
 
-            # 检查是否配置了该题
-            if index < len(self.config["droplist_prob"]):
-                p = self.config["droplist_prob"][index]
-            else:
-                p = -1
+            # 创建临时浏览器实例
+            options = webdriver.ChromeOptions()
+            options.add_argument('--headless')  # 无头模式
+            driver = webdriver.Chrome(options=options)
 
-            if p == -1:  # 随机选择
-                r = random.randint(1, len(options))
-            elif isinstance(p, list) and len(p) == len(options):  # 按概率选择
-                r = np.random.choice(a=np.arange(1, len(options) + 1), p=p)
-            else:  # 默认随机
-                r = random.randint(1, len(options))
+            try:
+                driver.get(url)
+                time.sleep(2)  # 等待页面加载
 
-            option = driver.find_element(By.XPATH, f"//ul[@id='select2-q{current}-results']/li[{r}]")
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", option)
-            option.click()
-            self.random_delay(*self.config["per_question_delay"])
+                # 获取所有题目
+                questions = driver.find_elements(By.CLASS_NAME, "div_question")
+
+                # 重置配置
+                self.config["single_prob"] = {}
+                self.config["multiple_prob"] = {}
+                self.config["matrix_prob"] = {}
+                self.config["droplist_prob"] = {}
+                self.config["scale_prob"] = {}
+                self.config["texts"] = {}
+                self.config["multiple_texts"] = {}
+                self.config["reorder_prob"] = {}
+
+                for q in questions:
+                    try:
+                        q_type = q.get_attribute("type")
+                        q_num = q.get_attribute("id").replace("div", "")
+
+                        if q_type == "1":  # 单选题
+                            options = q.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+                            self.config["single_prob"][q_num] = [-1] * len(options)
+
+                        elif q_type == "2":  # 多选题
+                            options = q.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+                            self.config["multiple_prob"][q_num] = [50] * len(options)
+                            self.config["min_selection"][q_num] = 1
+
+                        elif q_type == "3":  # 填空题
+                            self.config["texts"][q_num] = [""]
+
+                        elif q_type == "4":  # 矩阵题
+                            rows = q.find_elements(By.CLASS_NAME, "matrix-row")
+                            self.config["matrix_prob"][q_num] = [-1] * len(rows)
+
+                        elif q_type == "5":  # 量表题
+                            options = q.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+                            self.config["scale_prob"][q_num] = [1] * len(options)
+
+                        elif q_type == "6":  # 下拉框
+                            options = q.find_elements(By.TAG_NAME, "option")
+                            self.config["droplist_prob"][q_num] = [1] * (len(options) - 1)  # 减去默认选项
+
+                        elif q_type == "8":  # 多项填空
+                            inputs = q.find_elements(By.TAG_NAME, "input")
+                            self.config["multiple_texts"][q_num] = [[""] for _ in range(len(inputs))]
+
+                        elif q_type == "7":  # 排序题
+                            items = q.find_elements(By.CLASS_NAME, "reorder-item")
+                            self.config["reorder_prob"][q_num] = [1 / len(items)] * len(items)
+
+                    except Exception as e:
+                        logging.warning(f"解析第{q_num}题时出错: {str(e)}")
+                        continue
+
+                # 重新加载UI
+                self.reset_ui_with_config()
+                logging.info("问卷解析完成")
+                messagebox.showinfo("成功", "问卷解析完成！")
+
+            finally:
+                driver.quit()
+
         except Exception as e:
-            logging.error(f"填写下拉框题 {current} 时出错: {str(e)}")
+            logging.error(f"解析问卷时出错: {str(e)}")
+            messagebox.showerror("错误", f"解析问卷时出错: {str(e)}")
 
-    def fill_scale(self, driver: webdriver.Chrome, current: int, index: int):
-        """填写量表题"""
+    def start_filling(self):
+        """开始填写问卷"""
         try:
-            options = driver.find_elements(By.XPATH, f'//*[@id="div{current}"]/div[2]/div/ul/li')
-            if not options:
+            # 保存当前配置
+            if not self.save_config():
                 return
 
-            # 检查是否配置了该题
-            if index < len(self.config["scale_prob"]):
-                p = self.config["scale_prob"][index]
-            else:
-                p = -1
-
-            if p == -1:  # 随机选择
-                r = random.randint(1, len(options))
-            elif isinstance(p, list) and len(p) == len(options):  # 按概率选择
-                r = np.random.choice(a=np.arange(1, len(options) + 1), p=p)
-            else:  # 默认随机
-                r = random.randint(1, len(options))
-
-            element = driver.find_element(By.CSS_SELECTOR,
-                                          f"#div{current} > div.scale-div > div > ul > li:nth-child({r})")
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
-            try:
-                element.click()
-            except (ElementNotInteractableException, ElementClickInterceptedException):
-                driver.execute_script("arguments[0].click();", element)
-            self.random_delay(*self.config["per_question_delay"])
-        except Exception as e:
-            logging.error(f"填写量表题 {current} 时出错: {str(e)}")
-
-    def fill_slider(self, driver: webdriver.Chrome, current: int):
-        """填写滑块题"""
-        try:
-            score = random.randint(1, 100)
-            element = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
-            element.send_keys(str(score))
-            self.random_delay(*self.config["per_question_delay"])
-        except Exception as e:
-            logging.error(f"填写滑块题 {current} 时出错: {str(e)}")
-
-    def fill_reorder(self, driver: webdriver.Chrome, current: int, index: int):
-        """填写排序题"""
-        try:
-            options = driver.find_elements(By.XPATH, f'//*[@id="div{current}"]/ul/li')
-            if not options:
+            # 验证基本参数
+            if not self.config["url"]:
+                messagebox.showerror("错误", "请输入问卷链接")
                 return
 
-            # 获取配置的概率
-            q_key = str(current)
-            if q_key in self.config["reorder_prob"] and index < len(self.config["reorder_prob"][q_key]):
-                p = self.config["reorder_prob"][q_key][index]
-            else:
-                p = -1
+            try:
+                self.config["target_num"] = int(self.target_entry.get())
+                if self.config["target_num"] <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("错误", "目标份数必须是正整数")
+                return
 
-            # 随机排序
-            if p == -1:  # 完全随机
-                for j in range(1, len(options) + 1):
-                    r = random.randint(j, len(options))
-                    element = driver.find_element(By.CSS_SELECTOR, f"#div{current} > ul > li:nth-child({r})")
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                          element)
-                    try:
-                        element.click()
-                    except (ElementNotInteractableException, ElementClickInterceptedException):
-                        driver.execute_script("arguments[0].click();", element)
-                    time.sleep(0.4)
-            else:  # 按概率排序
-                # 创建一个选项索引列表
-                indices = list(range(1, len(options) + 1))
-                # 按概率选择排序
-                ordered_indices = np.random.choice(indices, size=len(options), replace=False, p=p)
+            try:
+                self.config["num_threads"] = int(self.num_threads.get())
+                if self.config["num_threads"] <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("错误", "窗口数量必须是正整数")
+                return
 
-                # 按顺序点击选项
-                for idx in ordered_indices:
-                    element = driver.find_element(By.CSS_SELECTOR, f"#div{current} > ul > li:nth-child({idx})")
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                          element)
-                    try:
-                        element.click()
-                    except (ElementNotInteractableException, ElementClickInterceptedException):
-                        driver.execute_script("arguments[0].click();", element)
-                    time.sleep(0.4)
+            # 更新运行状态
+            self.running = True
+            self.cur_num = 0
+            self.cur_fail = 0
+            self.pause_event.clear()
 
-            self.random_delay(*self.config["per_question_delay"])
+            # 更新按钮状态
+            self.start_btn.config(state=tk.DISABLED)
+            self.pause_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.NORMAL)
+
+            # 设置进度条初始值
+            self.progress_var.set(0)
+            self.question_progress_var.set(0)
+            self.status_var.set("运行中...")
+
+            # 创建并启动线程
+            threads = []
+            for i in range(self.config["num_threads"]):
+                x = (i % 2) * 600
+                y = (i // 2) * 400
+                t = threading.Thread(target=self.run_filling, args=(x, y))
+                t.daemon = True
+                t.start()
+                threads.append(t)
+
+            # 启动进度更新线程
+            progress_thread = threading.Thread(target=self.update_progress)
+            progress_thread.daemon = True
+            progress_thread.start()
+
         except Exception as e:
-            logging.error(f"填写排序题 {current} 时出错: {str(e)}")
+            logging.error(f"启动失败: {str(e)}")
+            messagebox.showerror("错误", f"启动失败: {str(e)}")
 
-    def submit_survey(self, driver: webdriver.Chrome):
-        """提交问卷"""
+    def run_filling(self, x=0, y=0):
+        """运行填写任务"""
+        options = webdriver.ChromeOptions()
+        if self.config["headless"]:
+            options.add_argument('--headless')
+        else:
+            options.add_argument(f'--window-position={x},{y}')
+
+        driver = None
         try:
-            # 尝试点击提交按钮
-            submit_button = driver.find_element(By.XPATH, '//*[@id="ctlNext"]')
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", submit_button)
-            submit_button.click()
-            time.sleep(1)
+            while self.running and self.cur_num < self.config["target_num"]:
+                # 检查是否暂停
+                self.pause_event.wait()
 
-            # 处理可能的弹窗
-            try:
-                WebDriverWait(driver, 2).until(EC.alert_is_present())
-                alert = driver.switch_to.alert
-                alert.accept()
-                time.sleep(1)
-            except:
-                pass
-
-            # 处理智能验证
-            try:
-                smart_button = WebDriverWait(driver, 3).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="SM_BTN_1"]'))
-                )
-                smart_button.click()
-                time.sleep(1)
-            except:
-                pass
-
-            # 处理滑块验证
-            try:
-                slider = WebDriverWait(driver, 3).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="nc_1__scale_text"]/span'))
-                )
-                if "请按住滑块" in slider.text:
-                    slider_button = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
-                    width = slider.size.get("width")
-                    ActionChains(driver).drag_and_drop_by_offset(slider_button, width, 0).perform()
-                    time.sleep(1)
-            except:
-                pass
-
-            # 检查是否提交成功
-            try:
-                WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "提交成功")]'))
-                )
-                logging.info("问卷提交成功")
-            except:
-                logging.warning("提交后未检测到成功提示")
-        except Exception as e:
-            logging.error(f"提交问卷时出错: {str(e)}")
-
-    def run_filling(self, xx, yy):
-        """实际的问卷填写逻辑"""
-        while self.running and self.cur_num < self.config["target_num"]:
-            # 检查暂停状态
-            if self.pause_event.is_set():
-                time.sleep(1)
-                continue
-
-            driver = None
-            try:
-                # 创建浏览器实例
-                option = webdriver.ChromeOptions()
-                option.add_experimental_option("excludeSwitches", ["enable-automation"])
-                option.add_experimental_option("useAutomationExtension", False)
-                option.add_argument('--disable-blink-features=AutomationControlled')
-
-                # 设置代理（如果需要）
+                # 获取代理IP
                 if self.config["use_ip"]:
-                    ip = self.zanip()
-                    if self.validate(ip):
-                        option.add_argument(f"--proxy-server={ip}")
-                        logging.info(f"使用代理IP: {ip}")
+                    try:
+                        response = requests.get(self.config["ip_api"])
+                        ip = response.text.strip()
+                        options.add_argument(f'--proxy-server={ip}')
+                    except Exception as e:
+                        logging.error(f"获取代理IP失败: {str(e)}")
+                        continue
 
-                # 设置无头模式
-                if self.config["headless"]:
-                    option.add_argument('--headless')
-                    option.add_argument('--disable-gpu')
+                # 创建浏览器实例
+                driver = webdriver.Chrome(options=options)
+                try:
+                    # 访问问卷
+                    driver.get(self.config["url"])
+                    time.sleep(self.config["page_load_delay"])
 
-                # 随机决定是否使用微信来源
-                use_weixin = random.random() < self.config["weixin_ratio"]
-                source_type = "微信" if use_weixin else "其他"
-
-                # 创建浏览器驱动
-                driver = webdriver.Chrome(options=option)
-
-                # 设置窗口位置和大小
-                if not self.config["headless"]:
-                    driver.set_window_position(xx, yy)
+                    # 随机决定是否使用微信作答
+                    use_weixin = random.random() < self.config["weixin_ratio"]
                     if use_weixin:
-                        driver.set_window_size(375, 812)  # 手机尺寸
+                        weixin_btn = driver.find_element(By.CLASS_NAME, "weixin-answer")
+                        weixin_btn.click()
+                        time.sleep(2)
+
+                    # 填写问卷
+                    self.fill_survey(driver)
+
+                    # 提交问卷
+                    submit_btn = driver.find_element(By.ID, "submit_button")
+                    time.sleep(self.config["submit_delay"])
+                    submit_btn.click()
+
+                    # 等待提交完成
+                    time.sleep(2)
+
+                    # 检查是否提交成功
+                    if "完成" in driver.title or "提交成功" in driver.page_source:
+                        with self.lock:
+                            self.cur_num += 1
+                        logging.info(f"第 {self.cur_num} 份问卷提交成功")
                     else:
-                        driver.set_window_size(550, 650)  # PC尺寸
+                        with self.lock:
+                            self.cur_fail += 1
+                        logging.warning(f"第 {self.cur_num + 1} 份问卷提交失败")
 
-                # 设置微信特定的User-Agent
-                if use_weixin:
-                    driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                        "userAgent": "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/86.0.4240.99 XWEB/4317 MMWEBSDK/20220105 Mobile Safari/537.36 MMWEBID/6170 MicroMessenger/8.0.19.2080(0x28001351) Process/toolsmp WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64"
-                    })
-
-                # 访问问卷链接
-                driver.get(self.config["url"])
-                time.sleep(2)  # 确保页面加载
-
-                # 填写问卷
-                if self.fill_survey(driver):
-                    # 更新计数
-                    with self.lock:
-                        self.cur_num += 1
-                        logging.info(f"已填写{self.cur_num}份 ({source_type}) - 失败{self.cur_fail}次")
-                else:
+                except Exception as e:
                     with self.lock:
                         self.cur_fail += 1
-                        logging.warning(f"填写失败 ({source_type}) - 总失败{self.cur_fail}次")
+                    logging.error(f"填写问卷时出错: {str(e)}")
+                    traceback.print_exc()
 
-                # 关闭浏览器
-                if driver:
-                    driver.quit()
-
-                # 随机延迟
-                self.random_delay(self.config["min_delay"], self.config["max_delay"])
-
-            except Exception as e:
-                with self.lock:
-                    self.cur_fail += 1
-                logging.error(f"填写出错: {str(e)}")
-                traceback.print_exc()
-                if driver:
+                finally:
                     try:
                         driver.quit()
                     except:
                         pass
 
-                if self.cur_fail >= self.config["target_num"] / 4 + 1:
-                    logging.critical("失败次数过多，程序将停止")
+                # 随机等待
+                if self.running:
+                    time.sleep(random.uniform(
+                        self.config["min_delay"],
+                        self.config["max_delay"]))
+
+        except Exception as e:
+            logging.error(f"运行任务时出错: {str(e)}")
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+    def fill_survey(self, driver):
+        """填写问卷内容"""
+        questions = driver.find_elements(By.CLASS_NAME, "div_question")
+        total_questions = len(questions)
+
+        # 随机总作答时间
+        total_time = random.randint(self.config["min_duration"], self.config["max_duration"])
+        start_time = time.time()
+
+        for i, q in enumerate(questions):
+            if not self.running:
+                break
+
+            try:
+                q_type = q.get_attribute("type")
+                q_num = q.get_attribute("id").replace("div", "")
+
+                # 更新题目进度
+                self.question_progress_var.set((i + 1) / total_questions * 100)
+                self.question_status_var.set(f"题目进度: {i + 1}/{total_questions}")
+
+                # 随机等待时间
+                per_question_delay = random.uniform(*self.config["per_question_delay"])
+                time.sleep(per_question_delay)
+
+                # 根据题型填写
+                if q_type == "1":  # 单选题
+                    self.fill_single_choice(q, q_num)
+                elif q_type == "2":  # 多选题
+                    self.fill_multiple_choice(q, q_num)
+                elif q_type == "3":  # 填空题
+                    self.fill_text(q, q_num)
+                elif q_type == "4":  # 矩阵题
+                    self.fill_matrix(q, q_num)
+                elif q_type == "5":  # 量表题
+                    self.fill_scale(q, q_num)
+                elif q_type == "6":  # 下拉框
+                    self.fill_droplist(q, q_num)
+                elif q_type == "7":  # 排序题
+                    self.fill_reorder(q, q_num)
+                elif q_type == "8":  # 多项填空
+                    self.fill_multiple_text(q, q_num)
+
+            except Exception as e:
+                logging.error(f"填写第{q_num}题时出错: {str(e)}")
+                continue
+
+            # 检查是否需要翻页
+            try:
+                next_page = driver.find_element(By.CLASS_NAME, "next-page")
+                if next_page.is_displayed():
+                    next_page.click()
+                    time.sleep(random.uniform(*self.config["per_page_delay"]))
+            except:
+                pass
+
+        # 补足剩余时间
+        elapsed_time = time.time() - start_time
+        if elapsed_time < total_time:
+            time.sleep(total_time - elapsed_time)
+
+    def fill_single_choice(self, question, q_num):
+        """填写单选题"""
+        options = question.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+        if not options:
+            return
+
+        probs = self.config["single_prob"].get(q_num, [-1])
+        if probs == -1 or len(probs) == 1 and probs[0] == -1:
+            # 随机选择
+            selected = random.choice(options)
+        else:
+            # 按概率选择
+            probs = probs[:len(options)]
+            selected = random.choices(options, weights=probs, k=1)[0]
+
+        try:
+            selected.click()
+        except:
+            # 如果直接点击失败，尝试使用JavaScript点击
+            driver = options[0].parent
+            driver.execute_script("arguments[0].click();", selected)
+
+    def fill_multiple_choice(self, question, q_num):
+        """填写多选题"""
+        options = question.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+        if not options:
+            return
+
+        probs = self.config["multiple_prob"].get(q_num, [50] * len(options))
+        min_selection = self.config["min_selection"].get(q_num, 1)
+
+        # 确定选择数量
+        max_selection = min(len(options), self.config.get("max_selection", {}).get(q_num, len(options)))
+        num_selections = random.randint(min_selection, max_selection)
+
+        # 根据概率选择选项
+        selected_indices = []
+        for i, prob in enumerate(probs[:len(options)]):
+            if random.random() * 100 < prob:
+                selected_indices.append(i)
+
+        # 调整选择数量
+        if len(selected_indices) < min_selection:
+            # 随机添加
+            available = [i for i in range(len(options)) if i not in selected_indices]
+            add_count = min_selection - len(selected_indices)
+            selected_indices.extend(random.sample(available, add_count))
+        elif len(selected_indices) > max_selection:
+            # 随机移除
+            remove_count = len(selected_indices) - max_selection
+            selected_indices = random.sample(selected_indices, max_selection)
+
+        # 点击选中的选项
+        for i in selected_indices:
+            try:
+                options[i].click()
+            except:
+                driver = options[0].parent
+                driver.execute_script("arguments[0].click();", options[i])
+
+        # 填写其他选项
+        if q_num in self.config["multiple_other"]:
+            try:
+                other_input = question.find_element(By.CSS_SELECTOR, "input[type='text']")
+                other_answers = self.config["multiple_other"][q_num]
+                if other_answers:
+                    other_input.send_keys(random.choice(other_answers))
+            except:
+                pass
+
+    def fill_text(self, question, q_num):
+        """填写填空题"""
+        inputs = question.find_elements(By.TAG_NAME, "input")
+        if not inputs:
+            inputs = question.find_elements(By.TAG_NAME, "textarea")
+        if not inputs:
+            return
+
+        texts = self.config["texts"].get(q_num, [""])
+        if not texts:
+            return
+
+        for input_elem in inputs:
+            try:
+                selected_text = random.choice(texts)
+                # 使用JavaScript设置值，避免输入事件问题
+                driver = input_elem.parent
+                driver.execute_script(f"arguments[0].value = '{selected_text}';", input_elem)
+                # 触发change事件
+                driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", input_elem)
+                time.sleep(random.uniform(0.1, 0.3))
+            except Exception as e:
+                logging.error(f"填写文本时出错: {str(e)}")
+
+    def fill_matrix(self, question, q_num):
+        """填写矩阵题"""
+        rows = question.find_elements(By.CLASS_NAME, "matrix-row")
+        if not rows:
+            return
+
+        probs = self.config["matrix_prob"].get(q_num, [-1])
+
+        for row in rows:
+            options = row.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+            if not options:
+                continue
+
+            if probs == -1 or (len(probs) == 1 and probs[0] == -1):
+                # 随机选择
+                selected = random.choice(options)
+            else:
+                # 按概率选择
+                row_probs = probs[:len(options)]
+                selected = random.choices(options, weights=row_probs, k=1)[0]
+
+            try:
+                selected.click()
+            except:
+                driver = options[0].parent
+                driver.execute_script("arguments[0].click();", selected)
+
+            time.sleep(random.uniform(0.1, 0.3))
+
+    def fill_scale(self, question, q_num):
+        """填写量表题"""
+        options = question.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+        if not options:
+            return
+
+        probs = self.config["scale_prob"].get(q_num, [1] * len(options))
+        if len(probs) < len(options):
+            probs.extend([1] * (len(options) - len(probs)))
+
+        # 按概率选择
+        selected = random.choices(options, weights=probs[:len(options)], k=1)[0]
+
+        try:
+            selected.click()
+        except:
+            driver = options[0].parent
+            driver.execute_script("arguments[0].click();", selected)
+
+    def fill_droplist(self, question, q_num):
+        """填写下拉框"""
+        select = question.find_element(By.TAG_NAME, "select")
+        options = select.find_elements(By.TAG_NAME, "option")[1:]  # 跳过第一个默认选项
+        if not options:
+            return
+
+        probs = self.config["droplist_prob"].get(q_num, [1] * len(options))
+        if len(probs) < len(options):
+            probs.extend([1] * (len(options) - len(probs)))
+
+        # 按概率选择
+        selected = random.choices(options, weights=probs[:len(options)], k=1)[0]
+
+        try:
+            selected.click()
+        except:
+            driver = options[0].parent
+            driver.execute_script("arguments[0].click();", selected)
+
+    def fill_reorder(self, question, q_num):
+        """填写排序题"""
+        items = question.find_elements(By.CLASS_NAME, "reorder-item")
+        if not items:
+            return
+
+        probs = self.config["reorder_prob"].get(q_num, [1 / len(items)] * len(items))
+
+        # 创建排序列表
+        order = list(range(len(items)))
+        random.shuffle(order)  # 随机打乱顺序
+
+        # 使用JavaScript移动元素
+        driver = items[0].parent
+        for i, item_index in enumerate(order):
+            try:
+                # 计算目标位置
+                target_y = items[i].location['y']
+                current_y = items[item_index].location['y']
+                offset = target_y - current_y
+
+                # 使用JavaScript移动元素
+                script = f"""
+                var item = arguments[0];
+                var rect = item.getBoundingClientRect();
+                var evt = new MouseEvent('mousedown', {{
+                    bubbles: true,
+                    clientX: rect.left,
+                    clientY: rect.top
+                }});
+                item.dispatchEvent(evt);
+
+                evt = new MouseEvent('mousemove', {{
+                    bubbles: true,
+                    clientX: rect.left,
+                    clientY: rect.top + {offset}
+                }});
+                item.dispatchEvent(evt);
+
+                evt = new MouseEvent('mouseup', {{
+                    bubbles: true,
+                    clientX: rect.left,
+                    clientY: rect.top + {offset}
+                }});
+                item.dispatchEvent(evt);
+                """
+                driver.execute_script(script, items[item_index])
+                time.sleep(random.uniform(0.2, 0.5))
+            except Exception as e:
+                logging.error(f"移动排序项时出错: {str(e)}")
+
+    def fill_multiple_text(self, question, q_num):
+        """填写多项填空题"""
+        inputs = question.find_elements(By.TAG_NAME, "input")
+        if not inputs:
+            return
+
+        text_lists = self.config["multiple_texts"].get(q_num, [])
+        if not text_lists:
+            return
+
+        for i, input_elem in enumerate(inputs):
+            if i < len(text_lists):
+                try:
+                    selected_text = random.choice(text_lists[i])
+                    # 使用JavaScript设置值
+                    driver = input_elem.parent
+                    driver.execute_script(f"arguments[0].value = '{selected_text}';", input_elem)
+                    # 触发change事件
+                    driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", input_elem)
+                    time.sleep(random.uniform(0.1, 0.3))
+                except Exception as e:
+                    logging.error(f"填写多项填空时出错: {str(e)}")
+
+    def update_progress(self):
+        """更新进度显示"""
+        while self.running:
+            try:
+                if self.config["target_num"] > 0:
+                    progress = (self.cur_num / self.config["target_num"]) * 100
+                    self.progress_var.set(progress)
+
+                status = "暂停中..." if self.paused else "运行中..."
+                status += f" 完成: {self.cur_num}/{self.config['target_num']}"
+                if self.cur_fail > 0:
+                    status += f" 失败: {self.cur_fail}"
+                self.status_var.set(status)
+
+                if self.cur_num >= self.config["target_num"]:
                     self.stop_filling()
+                    messagebox.showinfo("完成", "问卷填写完成！")
                     break
 
-                # 失败后延迟
-                time.sleep(5)
+            except Exception as e:
+                logging.error(f"更新进度时出错: {str(e)}")
 
-    def zanip(self):
-        """获取代理IP"""
-        try:
-            return requests.get(self.config["ip_api"]).text.strip()
-        except:
-            return ""
+            time.sleep(0.5)
 
-    def validate(self, ip):
-        """校验IP地址合法性"""
-        pattern = r"^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):(\d{1,5})$"
-        return re.match(pattern, ip) is not None
+    def toggle_pause(self):
+        """切换暂停/继续状态"""
+        self.paused = not self.paused
+        if self.paused:
+            self.pause_event.clear()
+            self.pause_btn.config(text="继续")
+            logging.info("已暂停")
+        else:
+            self.pause_event.set()
+            self.pause_btn.config(text="暂停")
+            logging.info("已继续")
+
+    def stop_filling(self):
+        """停止填写"""
+        self.running = False
+        self.pause_event.set()  # 确保所有线程都能退出
+        self.start_btn.config(state=tk.NORMAL)
+        self.pause_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.status_var.set("已停止")
+        logging.info("已停止")
+
+    def set_all_random(self, question_type, frame):
+        """将所有概率设置为随机"""
+        if question_type == "single":
+            for entries in self.single_entries:
+                for entry in entries:
+                    entry.delete(0, tk.END)
+                    entry.insert(0, "-1")
+        elif question_type == "matrix":
+            for entries in self.matrix_entries:
+                for entry in entries:
+                    entry.delete(0, tk.END)
+                    entry.insert(0, "-1")
+        logging.info(f"已将所有{question_type}题设置为随机")
+
+    def on_closing(self):
+        """关闭窗口时的处理"""
+        if self.running:
+            if messagebox.askokcancel("确认", "正在运行中，确定要退出吗？"):
+                self.stop_filling()
+                self.root.destroy()
+        else:
+            self.root.destroy()
+
+
+def main():
+    """主函数"""
+    root = tk.Tk()
+    app = WJXAutoFillApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop()
 
 
 if __name__ == "__main__":
-    root = ThemedTk(theme="aqua")
-    app = WJXAutoFillApp(root)
-    root.mainloop()
+    main()
