@@ -922,6 +922,7 @@ class WJXAutoFillApp:
         except Exception as e:
             logging.error(f"更新字体时出错: {str(e)}")
 
+    # 修改 parse_survey 方法
     def parse_survey(self):
         """解析问卷"""
         try:
@@ -937,10 +938,10 @@ class WJXAutoFillApp:
 
             try:
                 driver.get(url)
-                time.sleep(2)  # 等待页面加载
+                time.sleep(3)  # 增加等待时间确保页面加载完成
 
-                # 获取所有题目
-                questions = driver.find_elements(By.CLASS_NAME, "div_question")
+                # 修复1：使用正确的选择器获取题目
+                questions = driver.find_elements(By.CSS_SELECTOR, "#divQuestion > fieldset")
 
                 # 重置配置
                 self.config["single_prob"] = {}
@@ -952,48 +953,68 @@ class WJXAutoFillApp:
                 self.config["multiple_texts"] = {}
                 self.config["reorder_prob"] = {}
 
+                # 修复2：正确获取题目类型
                 for q in questions:
                     try:
-                        q_type = q.get_attribute("type")
-                        q_num = q.get_attribute("id").replace("div", "")
+                        # 获取题目ID
+                        q_id = q.get_attribute("id").replace("fieldset", "")
 
-                        if q_type == "1":  # 单选题
-                            options = q.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-                            self.config["single_prob"][q_num] = [-1] * len(options)
+                        # 获取题目类型
+                        q_type_element = q.find_element(By.CLASS_NAME, "div_title_question")
+                        q_type = q_type_element.get_attribute("type")
 
-                        elif q_type == "2":  # 多选题
-                            options = q.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-                            self.config["multiple_prob"][q_num] = [50] * len(options)
-                            self.config["min_selection"][q_num] = 1
+                        # 处理单选题
+                        if q_type == "3":
+                            options = q.find_elements(By.CSS_SELECTOR, "ul li")
+                            if options:
+                                self.config["single_prob"][q_id] = [-1] * len(options)
 
-                        elif q_type == "3":  # 填空题
-                            self.config["texts"][q_num] = [""]
+                        # 处理多选题
+                        elif q_type == "4":
+                            options = q.find_elements(By.CSS_SELECTOR, "ul li")
+                            if options:
+                                self.config["multiple_prob"][q_id] = [50] * len(options)
+                                self.config["min_selection"][q_id] = 1
 
-                        elif q_type == "4":  # 矩阵题
-                            rows = q.find_elements(By.CLASS_NAME, "matrix-row")
-                            self.config["matrix_prob"][q_num] = [-1] * len(rows)
+                        # 处理填空题
+                        elif q_type in ["1", "2"]:
+                            self.config["texts"][q_id] = ["示例答案"]
 
-                        elif q_type == "5":  # 量表题
-                            options = q.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-                            self.config["scale_prob"][q_num] = [1] * len(options)
+                        # 处理矩阵题
+                        elif q_type == "6":
+                            rows = q.find_elements(By.CSS_SELECTOR, "tr.tr")
+                            if rows and len(rows) > 1:
+                                self.config["matrix_prob"][q_id] = [-1] * (len(rows) - 1)
 
-                        elif q_type == "6":  # 下拉框
-                            options = q.find_elements(By.TAG_NAME, "option")
-                            self.config["droplist_prob"][q_num] = [1] * (len(options) - 1)  # 减去默认选项
+                        # 处理下拉框
+                        elif q_type == "7":
+                            options = q.find_elements(By.CSS_SELECTOR, "option")
+                            if options and len(options) > 1:
+                                self.config["droplist_prob"][q_id] = [1] * (len(options) - 1)
 
-                        elif q_type == "8":  # 多项填空
-                            inputs = q.find_elements(By.TAG_NAME, "input")
-                            self.config["multiple_texts"][q_num] = [[""] for _ in range(len(inputs))]
+                        # 处理量表题
+                        elif q_type == "5":
+                            options = q.find_elements(By.CSS_SELECTOR, "ul.scale-ul li")
+                            if options:
+                                self.config["scale_prob"][q_id] = [1] * len(options)
 
-                        elif q_type == "7":  # 排序题
-                            items = q.find_elements(By.CLASS_NAME, "reorder-item")
-                            self.config["reorder_prob"][q_num] = [1 / len(items)] * len(items)
+                        # 处理排序题
+                        elif q_type == "11":
+                            items = q.find_elements(By.CSS_SELECTOR, "ul.sort-ul li")
+                            if items:
+                                self.config["reorder_prob"][q_id] = [1 / len(items)] * len(items)
+
+                        # 处理多项填空
+                        elif q_type == "8":
+                            inputs = q.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
+                            if inputs:
+                                self.config["multiple_texts"][q_id] = [["示例答案"] for _ in range(len(inputs))]
 
                     except Exception as e:
-                        logging.warning(f"解析第{q_num}题时出错: {str(e)}")
+                        logging.warning(f"解析题目时出错: {str(e)}")
                         continue
 
-                # 重新加载UI
+                # 修复3：强制刷新UI
                 self.reset_ui_with_config()
                 logging.info("问卷解析完成")
                 messagebox.showinfo("成功", "问卷解析完成！")
