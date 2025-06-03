@@ -20,7 +20,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, \
     ElementNotInteractableException
 from ttkthemes import ThemedTk
-
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 # ================== 配置参数 ==================
 # 默认参数值
 DEFAULT_CONFIG = {
@@ -924,107 +926,158 @@ class WJXAutoFillApp:
 
     # 修改 parse_survey 方法
     def parse_survey(self):
-        """解析问卷"""
+        """解析问卷结构"""
         try:
             url = self.url_entry.get().strip()
             if not url:
                 messagebox.showerror("错误", "请输入问卷链接")
                 return
 
-            # 创建临时浏览器实例
+            logging.info("开始解析问卷结构...")
+            self.status_var.set("正在解析问卷...")
+            self.root.update()
+
+            # 创建浏览器实例
             options = webdriver.ChromeOptions()
             options.add_argument('--headless')  # 无头模式
+            options.add_argument('--disable-gpu')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_argument('--disable-blink-features=AutomationControlled')
+
             driver = webdriver.Chrome(options=options)
 
             try:
                 driver.get(url)
-                time.sleep(3)  # 增加等待时间确保页面加载完成
-
-                # 修复1：使用正确的选择器获取题目
-                questions = driver.find_elements(By.CSS_SELECTOR, "#divQuestion > fieldset")
+                # 等待问卷加载
+                wait = WebDriverWait(driver, 10)
+                wait.until(EC.presence_of_element_located((By.ID, "divQuestion")))
+                time.sleep(2)  # 额外等待确保完全加载
 
                 # 重置配置
-                self.config["single_prob"] = {}
-                self.config["multiple_prob"] = {}
-                self.config["matrix_prob"] = {}
-                self.config["droplist_prob"] = {}
-                self.config["scale_prob"] = {}
-                self.config["texts"] = {}
-                self.config["multiple_texts"] = {}
-                self.config["reorder_prob"] = {}
+                parsed_config = {
+                    "single_prob": {},  # 单选题
+                    "multiple_prob": {},  # 多选题
+                    "matrix_prob": {},  # 矩阵题
+                    "texts": {},  # 填空题
+                    "multiple_texts": {},  # 多项填空
+                    "reorder_prob": {},  # 排序题
+                    "droplist_prob": {},  # 下拉框
+                    "scale_prob": {},  # 量表题
+                    "question_texts": {}  # 题目文本
+                }
 
-                # 修复2：正确获取题目类型
-                for q in questions:
+                # 获取所有题目
+                questions = driver.find_elements(By.CSS_SELECTOR, "div.div_question")
+                total_questions = len(questions)
+                logging.info(f"找到 {total_questions} 个题目")
+
+                # 遍历每个题目
+                for question in questions:
                     try:
-                        # 获取题目ID
-                        q_id = q.get_attribute("id").replace("fieldset", "")
+                        # 获取题目ID和类型
+                        q_id = question.get_attribute("id").replace("div", "")
+                        q_type = question.get_attribute("type")
 
-                        # 获取题目类型
-                        q_type_element = q.find_element(By.CLASS_NAME, "div_title_question")
-                        q_type = q_type_element.get_attribute("type")
+                        # 获取题目文本
+                        title_element = question.find_element(By.CSS_SELECTOR, ".div_title_question")
+                        q_text = title_element.text.strip()
+                        parsed_config["question_texts"][q_id] = q_text
 
-                        # 处理单选题
-                        if q_type == "3":
-                            options = q.find_elements(By.CSS_SELECTOR, "ul li")
+                        if not q_type:
+                            continue
+
+                        q_type = int(q_type)
+                        logging.info(f"正在解析第 {q_id} 题 - {q_text}")
+
+                        if q_type == 1 or q_type == 2:  # 填空题
+                            # 检查是否为多项填空
+                            inputs = question.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
+                            if len(inputs) > 1:
+                                # 多项填空
+                                parsed_config["multiple_texts"][q_id] = []
+                                for i in range(len(inputs)):
+                                    parsed_config["multiple_texts"][q_id].append(["示例回答"])
+                                logging.info(f"  多项填空题，包含 {len(inputs)} 个填空项")
+                            else:
+                                # 单项填空
+                                parsed_config["texts"][q_id] = ["示例回答1", "示例回答2", "示例回答3"]
+                                logging.info("  单项填空题")
+
+                        elif q_type == 3:  # 单选题
+                            options = question.find_elements(By.CSS_SELECTOR, ".ui-radio")
                             if options:
-                                self.config["single_prob"][q_id] = [-1] * len(options)
+                                parsed_config["single_prob"][q_id] = [-1] * len(options)
+                                logging.info(f"  单选题，包含 {len(options)} 个选项")
 
-                        # 处理多选题
-                        elif q_type == "4":
-                            options = q.find_elements(By.CSS_SELECTOR, "ul li")
+                        elif q_type == 4:  # 多选题
+                            options = question.find_elements(By.CSS_SELECTOR, ".ui-checkbox")
                             if options:
-                                self.config["multiple_prob"][q_id] = [50] * len(options)
-                                self.config["min_selection"][q_id] = 1
+                                parsed_config["multiple_prob"][q_id] = [50] * len(options)
+                                logging.info(f"  多选题，包含 {len(options)} 个选项")
 
-                        # 处理填空题
-                        elif q_type in ["1", "2"]:
-                            self.config["texts"][q_id] = ["示例答案"]
+                        elif q_type == 5:  # 量表题
+                            scales = question.find_elements(By.CSS_SELECTOR, ".scale-ul li")
+                            if scales:
+                                parsed_config["scale_prob"][q_id] = [1] * len(scales)
+                                logging.info(f"  量表题，包含 {len(scales)} 个等级")
 
-                        # 处理矩阵题
-                        elif q_type == "6":
-                            rows = q.find_elements(By.CSS_SELECTOR, "tr.tr")
-                            if rows and len(rows) > 1:
-                                self.config["matrix_prob"][q_id] = [-1] * (len(rows) - 1)
+                        elif q_type == 6:  # 矩阵题
+                            rows = question.find_elements(By.CSS_SELECTOR, ".matrix-row")
+                            cols = question.find_elements(By.CSS_SELECTOR, ".matrix-col")
+                            if rows and cols:
+                                parsed_config["matrix_prob"][q_id] = [-1] * len(cols)
+                                logging.info(f"  矩阵题，包含 {len(rows)} 行 {len(cols)} 列")
 
-                        # 处理下拉框
-                        elif q_type == "7":
-                            options = q.find_elements(By.CSS_SELECTOR, "option")
-                            if options and len(options) > 1:
-                                self.config["droplist_prob"][q_id] = [1] * (len(options) - 1)
+                        elif q_type == 7:  # 下拉框
+                            # 点击下拉框获取选项
+                            try:
+                                dropdown = question.find_element(By.CSS_SELECTOR, f"#select2-q{q_id}-container")
+                                dropdown.click()
+                                time.sleep(0.5)
+                                options = driver.find_elements(By.CSS_SELECTOR, f"#select2-q{q_id}-results li")
+                                if options:
+                                    parsed_config["droplist_prob"][q_id] = [1] * len(options)
+                                    logging.info(f"  下拉框题，包含 {len(options)} 个选项")
+                                # 关闭下拉框
+                                driver.find_element(By.CSS_SELECTOR, "body").click()
+                            except:
+                                logging.warning(f"  无法获取下拉框 {q_id} 的选项")
 
-                        # 处理量表题
-                        elif q_type == "5":
-                            options = q.find_elements(By.CSS_SELECTOR, "ul.scale-ul li")
-                            if options:
-                                self.config["scale_prob"][q_id] = [1] * len(options)
-
-                        # 处理排序题
-                        elif q_type == "11":
-                            items = q.find_elements(By.CSS_SELECTOR, "ul.sort-ul li")
+                        elif q_type == 11:  # 排序题
+                            items = question.find_elements(By.CSS_SELECTOR, ".sort-ul li")
                             if items:
-                                self.config["reorder_prob"][q_id] = [1 / len(items)] * len(items)
-
-                        # 处理多项填空
-                        elif q_type == "8":
-                            inputs = q.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-                            if inputs:
-                                self.config["multiple_texts"][q_id] = [["示例答案"] for _ in range(len(inputs))]
+                                parsed_config["reorder_prob"][q_id] = [(1 / len(items))] * len(items)
+                                logging.info(f"  排序题，包含 {len(items)} 个选项")
 
                     except Exception as e:
-                        logging.warning(f"解析题目时出错: {str(e)}")
+                        logging.error(f"解析题目 {q_id} 时出错: {str(e)}")
                         continue
 
-                # 修复3：强制刷新UI
-                self.reset_ui_with_config()
+                # 更新配置
+                self.config.update(parsed_config)
+
+                # 清除旧的题型设置界面并重新创建
+                for widget in self.question_frame.winfo_children():
+                    widget.destroy()
+                self.create_question_settings()
+
                 logging.info("问卷解析完成")
                 messagebox.showinfo("成功", "问卷解析完成！")
 
+                # 切换到题型设置标签页
+                self.notebook.select(1)
+
+            except Exception as e:
+                logging.error(f"解析问卷时出错: {str(e)}")
+                messagebox.showerror("错误", f"解析问卷时出错: {str(e)}")
             finally:
                 driver.quit()
 
         except Exception as e:
-            logging.error(f"解析问卷时出错: {str(e)}")
-            messagebox.showerror("错误", f"解析问卷时出错: {str(e)}")
+            logging.error(f"启动浏览器时出错: {str(e)}")
+            messagebox.showerror("错误", f"启动浏览器时出错: {str(e)}")
 
     def start_filling(self):
         """开始填写问卷"""
