@@ -691,14 +691,25 @@ class WJXAutoFillApp:
         ttk.Label(tip_frame, text="提示: 鼠标悬停在题号上可查看题目内容", style='Warning.TLabel').pack()
 
     def create_single_settings(self, frame):
-        """创建单选题设置"""
+        """创建单选题设置界面"""
         padx, pady = 8, 5
         self.single_entries = []
-        self.option_text_labels = []  # 重置选项文本标签列表
+        self.option_text_labels = []
 
-        # 说明标签
-        ttk.Label(frame, text="设置每个选项的概率（-1表示随机选择）", font=("Arial", 9, "italic")).pack(
-            anchor=tk.W, padx=padx)
+        # 说明标签容器
+        desc_frame = ttk.Frame(frame)
+        desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
+
+        # 主要说明
+        ttk.Label(desc_frame, text="单选题配置说明：",
+                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
+
+        ttk.Label(desc_frame,
+                  text="• 输入 -1 表示随机选择\n" +
+                       "• 输入正数表示选项的相对权重，如[1,2,1]表示选择概率比为1:2:1\n" +
+                       "• 所有权重会自动归一化，[2,4,2]等价于[1,2,1]",
+                  justify=tk.LEFT,
+                  font=("Arial", 9)).pack(anchor=tk.W, padx=5)
 
         # 创建表格框架
         table_frame = ttk.Frame(frame)
@@ -712,84 +723,93 @@ class WJXAutoFillApp:
 
         # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["single_prob"].items(), start=1):
+            # 当前行的基础位置
+            base_row = row_idx * 4 - 3  # 每题占4行
+
             # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"单选题 {q_num}")
 
-            # 创建题号标签并添加Tooltip
+            # 创建题号标签和Tooltip
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2")
-            q_label.grid(row=row_idx, column=0, padx=padx, pady=pady)
+            q_label.grid(row=base_row, column=0, rowspan=3, padx=padx, pady=pady)
 
-            # 添加题目预览 - 显示具体题目内容
+            # 添加题目预览
             preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
             preview_label = ttk.Label(table_frame, text=preview_text, width=20)
-            preview_label.grid(row=row_idx, column=1, padx=padx, pady=pady)
+            preview_label.grid(row=base_row, column=1, rowspan=3, padx=padx, pady=pady)
 
-            # 添加Tooltip - 显示完整题目内容
+            # 添加Tooltips
             tooltip_text = f"题目类型: 单选题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
-
-            # 为预览标签也添加提示
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
 
-            option_count = 5 if probs == -1 else len(probs) if isinstance(probs, list) else 5
             entry_row = []
-            text_labels_row = []  # 存储当前题目的选项文本标签
+            text_labels_row = []
+            option_count = 5 if probs == -1 else len(probs) if isinstance(probs, list) else 5
 
+            # 添加选项
             for col in range(2, option_count + 2):
-                # 选项输入框
+                # 权重输入框
                 entry = ttk.Entry(table_frame, width=8)
                 if probs == -1:
-                    entry.insert(0, -1)
+                    entry.insert(0, "-1")
                 elif isinstance(probs, list) and col - 2 < len(probs):
-                    entry.insert(0, probs[col - 2])
+                    entry.insert(0, str(probs[col - 2]))
                 else:
-                    entry.insert(0, "")
-                entry.grid(row=row_idx, column=col, padx=padx, pady=pady)
+                    entry.insert(0, "1")  # 默认权重为1
+                entry.grid(row=base_row, column=col, padx=padx, pady=(pady, 0))
                 entry_row.append(entry)
 
-                # 选项文本标签
+                # 选项文本
                 option_idx = col - 2
                 option_text = ""
                 if str(q_num) in self.config["option_texts"] and option_idx < len(
                         self.config["option_texts"][str(q_num)]):
                     option_text = self.config["option_texts"][str(q_num)][option_idx]
 
+                # 选项文本标签
                 text_label = ttk.Label(table_frame, text=option_text, font=("Arial", 8), foreground="gray")
-                text_label.grid(row=row_idx * 2, column=col, padx=padx, pady=(0, 5))
+                text_label.grid(row=base_row + 1, column=col, padx=padx, pady=(0, pady))
                 text_labels_row.append(text_label)
 
-                # 根据设置显示/隐藏选项文本
+                # 权重说明标签
+                weight_label = ttk.Label(table_frame,
+                                         text="相对权重",
+                                         font=("Arial", 8),
+                                         foreground="gray")
+                weight_label.grid(row=base_row + 2, column=col, padx=padx, pady=(0, pady))
+
                 if not self.config["show_option_text"]:
-                    text_label.grid_remove()  # 默认隐藏
+                    text_label.grid_remove()
 
             self.single_entries.append(entry_row)
             self.option_text_labels.append(text_labels_row)
 
-            # 为每个题目添加操作按钮
+            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
-            btn_frame.grid(row=row_idx, column=option_count + 2, padx=5, pady=5, sticky=tk.W)
+            btn_frame.grid(row=base_row, column=option_count + 2, rowspan=3, padx=5, pady=5)
 
-            # 添加偏左按钮
             ttk.Button(btn_frame, text="偏左", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("single", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加偏右按钮
             ttk.Button(btn_frame, text="偏右", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("single", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加随机按钮
             ttk.Button(btn_frame, text="随机", width=4,
-                       command=lambda q=q_num, e=entry_row: self.set_question_random("single", q, e)).pack(side=tk.LEFT,
-                                                                                                           padx=2)
+                       command=lambda q=q_num, e=entry_row: self.set_question_random("single", q, e)).pack(
+                side=tk.LEFT, padx=2)
 
-            # 添加平均按钮
             ttk.Button(btn_frame, text="平均", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_average("single", q, e)).pack(
                 side=tk.LEFT, padx=2)
+
+            # 添加分隔行
+            ttk.Separator(table_frame, orient='horizontal').grid(
+                row=base_row + 3, column=0, columnspan=option_count + 3, sticky='ew', pady=10)
 
         # 根据设置显示选项文本
         if self.config["show_option_text"]:
@@ -798,22 +818,35 @@ class WJXAutoFillApp:
                     label.grid()
 
     def create_multi_settings(self, frame):
-        """创建多选题设置"""
+        """创建多选题设置界面"""
         padx, pady = 8, 5
         self.multi_entries = []
         self.min_selection_entries = []
         self.max_selection_entries = []
-        self.option_text_labels = []  # 重置选项文本标签列表
+        self.option_text_labels = []
 
-        # 说明标签
-        ttk.Label(frame, text="设置每个选项被选择的概率（0-100）及最小/最大选择数", font=("Arial", 9, "italic")).pack(
-            anchor=tk.W, padx=padx)
+        # 说明标签容器
+        desc_frame = ttk.Frame(frame)
+        desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
+
+        # 主要说明
+        ttk.Label(desc_frame, text="多选题配置说明：",
+                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
+
+        ttk.Label(desc_frame, text="• 每个选项概率范围为0-100，表示该选项被选中的独立概率",
+                  font=("Arial", 9)).pack(anchor=tk.W)
+
+        ttk.Label(desc_frame, text="• 例如：[50,100,0]表示选项1有50%概率选中，选项2必选，选项3不选",
+                  font=("Arial", 9)).pack(anchor=tk.W)
+
+        ttk.Label(desc_frame, text="• 建议至少有一个选项概率≥50%，确保符合最小选择数要求",
+                  font=("Arial", 9)).pack(anchor=tk.W)
 
         # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # 表头 - 增加最小选择数和最大选择数列
+        # 表头
         headers = ["题号", "题目预览", "最小选择", "最大选择", "选项1", "选项2", "选项3", "选项4", "选项5", "操作"]
         for col, header in enumerate(headers):
             ttk.Label(table_frame, text=header, font=("Arial", 9, "bold")).grid(
@@ -821,55 +854,74 @@ class WJXAutoFillApp:
 
         # 添加题目行
         for row_idx, (q_num, config) in enumerate(self.config["multiple_prob"].items(), start=1):
+            # 当前行的基础位置
+            base_row = row_idx * 3 - 2  # 每题占3行
+
             # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"多选题 {q_num}")
 
-            # 创建题号标签并添加Tooltip
+            # 创建题号标签
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2")
-            q_label.grid(row=row_idx, column=0, padx=padx, pady=pady)
+            q_label.grid(row=base_row, column=0, padx=padx, pady=pady)
 
-            # 添加题目预览 - 显示具体题目内容
+            # 添加题目预览
             preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
             preview_label = ttk.Label(table_frame, text=preview_text, width=20)
-            preview_label.grid(row=row_idx, column=1, padx=padx, pady=pady)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady)
 
-            # 添加Tooltip - 显示完整题目内容
+            # 添加Tooltips
             tooltip_text = f"题目类型: 多选题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
-
-            # 为预览标签也添加提示
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
 
-            # 最小选择数输入框
+            # 最小选择数
             min_entry = ttk.Spinbox(table_frame, from_=1, to=10, width=4)
             min_entry.set(config.get("min_selection", 1))
-            min_entry.grid(row=row_idx, column=2, padx=padx, pady=pady)
+            min_entry.grid(row=base_row, column=2, padx=padx, pady=pady)
             self.min_selection_entries.append(min_entry)
 
-            # 最大选择数输入框
+            # 最小选择说明
+            ttk.Label(table_frame, text="最少选择\n项数",
+                      font=("Arial", 8), foreground="gray").grid(
+                row=base_row + 2, column=2, padx=padx, pady=(0, 5))
+
+            # 最大选择数
             max_entry = ttk.Spinbox(table_frame, from_=1, to=10, width=4)
             max_entry.set(config.get("max_selection", len(config["prob"])))
-            max_entry.grid(row=row_idx, column=3, padx=padx, pady=pady)
+            max_entry.grid(row=base_row, column=3, padx=padx, pady=pady)
             self.max_selection_entries.append(max_entry)
 
+            # 最大选择说明
+            ttk.Label(table_frame, text="最多选择\n项数",
+                      font=("Arial", 8), foreground="gray").grid(
+                row=base_row + 2, column=3, padx=padx, pady=(0, 5))
+
             entry_row = []
-            text_labels_row = []  # 存储当前题目的选项文本标签
+            text_labels_row = []
             probs = config["prob"]
             option_count = len(probs) if isinstance(probs, list) else 5
 
-            for col in range(4, option_count + 4):  # 从第4列开始
+            # 添加选项
+            for col in range(4, option_count + 4):
                 # 选项输入框
                 entry = ttk.Entry(table_frame, width=8)
                 if isinstance(probs, list) and col - 4 < len(probs):
                     entry.insert(0, probs[col - 4])
                 else:
                     entry.insert(0, 50)
-                entry.grid(row=row_idx, column=col, padx=padx, pady=pady)
+                entry.grid(row=base_row, column=col, padx=padx, pady=pady)
                 entry_row.append(entry)
 
-                # 选项文本标签
+                # 选项概率说明
+                prob_label = ttk.Label(table_frame,
+                                       text="选中概率\n(0-100%)",
+                                       font=("Arial", 8),
+                                       foreground="gray")
+                prob_label.grid(row=base_row + 2, column=col, padx=padx, pady=(0, 5))
+
+                # 选项文本
                 option_idx = col - 4
                 option_text = ""
                 if str(q_num) in self.config["option_texts"] and option_idx < len(
@@ -877,41 +929,35 @@ class WJXAutoFillApp:
                     option_text = self.config["option_texts"][str(q_num)][option_idx]
 
                 text_label = ttk.Label(table_frame, text=option_text, font=("Arial", 8), foreground="gray")
-                text_label.grid(row=row_idx * 2, column=col, padx=padx, pady=(0, 5))
+                text_label.grid(row=base_row + 1, column=col, padx=padx, pady=(0, 5))
                 text_labels_row.append(text_label)
 
-                # 根据设置显示/隐藏选项文本
                 if not self.config["show_option_text"]:
-                    text_label.grid_remove()  # 默认隐藏
+                    text_label.grid_remove()
 
             self.multi_entries.append(entry_row)
             self.option_text_labels.append(text_labels_row)
 
-            # 为每个题目添加操作按钮
+            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
-            btn_frame.grid(row=row_idx, column=option_count + 4, padx=5, pady=5, sticky=tk.W)
+            btn_frame.grid(row=base_row, column=option_count + 4, padx=5, pady=5, sticky=tk.W)
 
-            # 添加偏左按钮
             ttk.Button(btn_frame, text="偏左", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("multiple", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加偏右按钮
             ttk.Button(btn_frame, text="偏右", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("multiple", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加随机按钮
             ttk.Button(btn_frame, text="随机", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_random("multiple", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加50%按钮
             ttk.Button(btn_frame, text="50%", width=4,
                        command=lambda q=q_num, e=entry_row: self.set_question_value("multiple", q, e, 50)).pack(
                 side=tk.LEFT, padx=2)
 
-        # 根据设置显示选项文本
         if self.config["show_option_text"]:
             for labels_row in self.option_text_labels:
                 for label in labels_row:
@@ -1626,14 +1672,22 @@ class WJXAutoFillApp:
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--blink-settings=imagesEnabled=false')  # 禁用图片加载
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option("useAutomationExtension", False)
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument(
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            prefs = {
+                'profile.default_content_setting_values': {
+                    'images': 2,  # 禁用图片
+                    'javascript': 1,  # 启用 JavaScript
+                    'css': 2  # 禁用 CSS
+                }
+            }
+            options.add_experimental_option('prefs', prefs)
 
             driver = webdriver.Chrome(options=options)
-            driver.implicitly_wait(10)
+            driver.set_page_load_timeout(10)  # 设置页面加载超时
+            driver.implicitly_wait(5)  # 减少隐式等待时间
 
             try:
                 logging.info(f"正在访问问卷: {url}")
@@ -1644,26 +1698,52 @@ class WJXAutoFillApp:
                 self.question_status_var.set("加载问卷...")
 
                 # 等待页面加载 - 优化等待条件
-                WebDriverWait(driver, 20).until(
+                WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, ".field.ui-field-contain, .div_question"))
                 )
 
-                # 优化：移除不必要的滚动操作
-                self.question_progress_var.set(50)
-                self.question_status_var.set("解析题目...")
+                # 获取所有题目和选项的数据（一次性获取）
+                questions_data = driver.execute_script("""
+                    const questions = [];
+                    document.querySelectorAll('.field.ui-field-contain, .div_question').forEach(q => {
+                        const qData = {
+                            id: q.id,
+                            title: q.querySelector('.div_title_question, .div_topic_question, .topic_title')?.innerText.trim() || '',
+                            type: '',
+                            options: []
+                        };
 
-                # 获取所有题目
-                questions = driver.find_elements(By.CSS_SELECTOR, ".field.ui-field-contain, .div_question")
+                        // 确定题型
+                        if(q.querySelector('.ui-radio')) qData.type = '3';
+                        else if(q.querySelector('.ui-checkbox')) qData.type = '4';
+                        else if(q.querySelector('input[type="text"], textarea')) qData.type = '1';
+                        else if(q.querySelector('.scale-ul')) qData.type = '5';
+                        else if(q.querySelector('.matrix')) qData.type = '6';
+                        else if(q.querySelector('select')) qData.type = '7';
+                        else if(q.querySelector('.sort-ul')) qData.type = '11';
 
-                # 如果没找到题目，尝试备用选择器
-                if not questions:
-                    questions = driver.find_elements(By.CSS_SELECTOR, ".div_question")
-                    if not questions:
-                        raise Exception("未找到任何题目，请检查问卷链接是否正确")
+                        // 获取选项文本
+                        if(['3','4','5','6','7','11'].includes(qData.type)) {
+                            const optionsElements = {
+                                '3': '.ui-radio label',
+                                '4': '.ui-checkbox label',
+                                '5': '.scale-ul li',
+                                '6': '.matrix tr td:first-child',
+                                '7': 'select option:not(:first-child)',
+                                '11': '.sort-ul li'
+                            }[qData.type];
 
-                logging.info(f"发现 {len(questions)} 个问题")
+                            q.querySelectorAll(optionsElements).forEach(opt => {
+                                qData.options.push(opt.innerText.trim());
+                            });
+                        }
 
-                # 重置配置
+                        questions.push(qData);
+                    });
+                    return questions;
+                """)
+
+                # 快速处理数据
                 parsed_config = {
                     "single_prob": {},
                     "multiple_prob": {},
@@ -1674,191 +1754,39 @@ class WJXAutoFillApp:
                     "multiple_texts": {},
                     "reorder_prob": {},
                     "question_texts": {},
-                    "option_texts": {}  # 新增选项文本存储
+                    "option_texts": {}
                 }
 
-                # 遍历题目
-                for i, q in enumerate(questions):
-                    # 更新进度
-                    progress = 50 + (i / len(questions)) * 50
-                    self.question_progress_var.set(progress)
-                    self.question_status_var.set(f"解析题目 {i + 1}/{len(questions)}")
+                for data in questions_data:
+                    q_num = data['id'].replace("div", "")
+                    parsed_config["question_texts"][q_num] = data['title']
 
-                    try:
-                        # 获取题目ID
-                        q_id = q.get_attribute("id")
-                        if q_id and "div" in q_id:
-                            q_num = q_id.replace("div", "")
+                    if data['options']:
+                        parsed_config["option_texts"][q_num] = data['options']
+
+                    if data['type'] == '3':  # 单选
+                        parsed_config["single_prob"][q_num] = [-1] * len(data['options'])
+                    elif data['type'] == '4':  # 多选
+                        parsed_config["multiple_prob"][q_num] = {
+                            "prob": [50] * len(data['options']),
+                            "min_selection": 1,
+                            "max_selection": len(data['options'])
+                        }
+                    elif data['type'] == '5':  # 量表
+                        parsed_config["scale_prob"][q_num] = [1] * len(data['options'])
+                    elif data['type'] == '6':  # 矩阵
+                        parsed_config["matrix_prob"][q_num] = [-1] * len(data['options'])
+                    elif data['type'] == '7':  # 下拉
+                        parsed_config["droplist_prob"][q_num] = [1] * len(data['options'])
+                    elif data['type'] == '11':  # 排序
+                        parsed_config["reorder_prob"][q_num] = [1.0 / len(data['options'])] * len(data['options'])
+                    elif data['type'] in ['1', '2']:  # 填空
+                        inputs_count = len(driver.find_elements(By.CSS_SELECTOR,
+                                                                f"#div{q_num} input[type='text'], #div{q_num} textarea"))
+                        if inputs_count > 1:
+                            parsed_config["multiple_texts"][q_num] = [["示例答案"] for _ in range(inputs_count)]
                         else:
-                            q_num = str(i + 1)
-
-                        # 获取题目文本
-                        q_text = ""
-                        try:
-                            title_elements = q.find_elements(By.CSS_SELECTOR,
-                                                             ".div_title_question, .div_topic_question, .topic_title")
-                            if title_elements:
-                                q_text = title_elements[0].text.strip()
-                        except:
-                            pass
-
-                        if not q_text:
-                            q_text = f"题目{q_num}"
-
-                        parsed_config["question_texts"][q_num] = q_text
-
-                        # 获取题目类型
-                        q_type = None
-
-                        # 检测单选题
-                        if q.find_elements(By.CSS_SELECTOR, ".ui-radio"):
-                            q_type = "3"
-                        # 检测多选题
-                        elif q.find_elements(By.CSS_SELECTOR, ".ui-checkbox"):
-                            q_type = "4"
-                        # 检测填空题
-                        elif q.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea"):
-                            q_type = "1"
-                        # 检测多行填空题
-                        elif q.find_elements(By.CSS_SELECTOR, "textarea"):
-                            q_type = "2"
-                        # 检测量表题
-                        elif q.find_elements(By.CSS_SELECTOR, ".scale-ul"):
-                            q_type = "5"
-                        # 检测矩阵题
-                        elif q.find_elements(By.CSS_SELECTOR, ".matrix"):
-                            q_type = "6"
-                        # 检测下拉框
-                        elif q.find_elements(By.CSS_SELECTOR, "select"):
-                            q_type = "7"
-                        # 检测排序题
-                        elif q.find_elements(By.CSS_SELECTOR, ".sort-ul"):
-                            q_type = "11"
-
-                        if not q_type:
-                            logging.warning(f"无法确定题目 {q_num} 的类型，跳过")
-                            continue
-
-                        logging.info(f"解析第{q_num}题 - 类型:{q_type} - {q_text}")
-
-                        # 收集选项文本
-                        option_texts = []
-                        if q_type in ["3", "4", "5", "6", "7", "11"]:  # 有选项的题型
-                            try:
-                                if q_type == "3":  # 单选题
-                                    options = q.find_elements(By.CSS_SELECTOR, ".ui-radio")
-                                    for opt in options:
-                                        try:
-                                            # 尝试获取选项文本
-                                            text = opt.find_element(By.CSS_SELECTOR, "label").text.strip()
-                                            option_texts.append(text)
-                                        except:
-                                            option_texts.append("")
-                                elif q_type == "4":  # 多选题
-                                    options = q.find_elements(By.CSS_SELECTOR, ".ui-checkbox")
-                                    for opt in options:
-                                        try:
-                                            text = opt.find_element(By.CSS_SELECTOR, "label").text.strip()
-                                            option_texts.append(text)
-                                        except:
-                                            option_texts.append("")
-                                # 其他题型类似处理...
-                                elif q_type == "5":  # 量表题
-                                    options = q.find_elements(By.CSS_SELECTOR, ".scale-ul li")
-                                    for opt in options:
-                                        try:
-                                            text = opt.text.strip()
-                                            option_texts.append(text)
-                                        except:
-                                            option_texts.append("")
-                                elif q_type == "6":  # 矩阵题
-                                    rows = q.find_elements(By.CSS_SELECTOR, ".matrix tr")
-                                    if rows and len(rows) > 1:  # 确保有题目行
-                                        for row in rows[1:]:
-                                            try:
-                                                text = row.find_element(By.CSS_SELECTOR, "td").text.strip()
-                                                option_texts.append(text)
-                                            except:
-                                                option_texts.append("")
-                                elif q_type == "7":  # 下拉框
-                                    try:
-                                        select = q.find_element(By.TAG_NAME, "select")
-                                        options = select.find_elements(By.TAG_NAME, "option")
-                                        if len(options) > 1:  # 排除第一个默认选项
-                                            for opt in options[1:]:
-                                                try:
-                                                    text = opt.text.strip()
-                                                    option_texts.append(text)
-                                                except:
-                                                    option_texts.append("")
-                                    except:
-                                        pass
-                                elif q_type == "11":  # 排序题
-                                    items = q.find_elements(By.CSS_SELECTOR, ".sort-ul li")
-                                    for item in items:
-                                        try:
-                                            text = item.text.strip()
-                                            option_texts.append(text)
-                                        except:
-                                            option_texts.append("")
-                            except Exception as e:
-                                logging.warning(f"获取题目 {q_num} 选项文本失败: {str(e)}")
-
-                        # 保存选项文本
-                        if option_texts:
-                            parsed_config["option_texts"][q_num] = option_texts
-
-                        # 根据题型生成配置
-                        if q_type in ["1", "2"]:  # 填空题
-                            inputs = q.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-                            if len(inputs) > 1:
-                                parsed_config["multiple_texts"][q_num] = [["示例答案"] for _ in range(len(inputs))]
-                            else:
-                                parsed_config["texts"][q_num] = ["示例答案"]
-
-                        elif q_type == "3":  # 单选题
-                            options = q.find_elements(By.CSS_SELECTOR, ".ui-radio")
-                            if options:
-                                parsed_config["single_prob"][q_num] = [-1] * len(options)
-
-                        elif q_type == "4":  # 多选题
-                            options = q.find_elements(By.CSS_SELECTOR, ".ui-checkbox")
-                            if options:
-                                # 多选题增强配置
-                                parsed_config["multiple_prob"][q_num] = {
-                                    "prob": [50] * len(options),
-                                    "min_selection": 1,
-                                    "max_selection": len(options)
-                                }
-
-                        elif q_type == "5":  # 量表题
-                            options = q.find_elements(By.CSS_SELECTOR, ".scale-ul li")
-                            if options:
-                                parsed_config["scale_prob"][q_num] = [1] * len(options)
-
-                        elif q_type == "6":  # 矩阵题
-                            rows = q.find_elements(By.CSS_SELECTOR, ".matrix tr")
-                            if rows and len(rows) > 1:  # 确保有题目行
-                                parsed_config["matrix_prob"][q_num] = [-1] * (len(rows) - 1)  # 减去表头行
-
-                        elif q_type == "7":  # 下拉框
-                            try:
-                                select = q.find_element(By.TAG_NAME, "select")
-                                options = select.find_elements(By.TAG_NAME, "option")
-                                if len(options) > 1:  # 排除第一个默认选项
-                                    parsed_config["droplist_prob"][q_num] = [1] * (len(options) - 1)
-                            except:
-                                pass
-
-                        elif q_type == "11":  # 排序题
-                            items = q.find_elements(By.CSS_SELECTOR, ".sort-ul li")
-                            if items:
-                                item_count = len(items)
-                                parsed_config["reorder_prob"][q_num] = [1.0 / item_count] * item_count
-
-                    except Exception as e:
-                        logging.warning(f"解析题目 {q_num} 时出错: {str(e)}")
-                        continue
+                            parsed_config["texts"][q_num] = ["示例答案"]
 
                 # 更新配置
                 self.config.update(parsed_config)
@@ -1866,15 +1794,9 @@ class WJXAutoFillApp:
                 # 重新加载题型设置界面
                 self.reload_question_settings()
 
-                # 检查解析结果
-                total_questions = (len(parsed_config['single_prob']) +
-                                   len(parsed_config['multiple_prob']) +
-                                   len(parsed_config['matrix_prob']) +
-                                   len(parsed_config['texts']) +
-                                   len(parsed_config['multiple_texts']) +
-                                   len(parsed_config['reorder_prob']) +
-                                   len(parsed_config['droplist_prob']) +
-                                   len(parsed_config['scale_prob']))
+                total_questions = sum(
+                    len(parsed_config[k]) for k in ['single_prob', 'multiple_prob', 'matrix_prob', 'texts',
+                                                    'multiple_texts', 'reorder_prob', 'droplist_prob', 'scale_prob'])
 
                 if total_questions == 0:
                     logging.warning("解析结束，但未发现任何题目")
@@ -2082,84 +2004,96 @@ class WJXAutoFillApp:
     def fill_survey(self, driver):
         """填写问卷内容"""
         try:
-            # 使用更通用的题目选择器
             questions = WebDriverWait(driver, 20).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".field.ui-field-contain, .div_question"))
             )
 
             if not questions:
-                # 尝试备用选择器
                 questions = driver.find_elements(By.CSS_SELECTOR, ".div_question")
                 if not questions:
                     logging.warning("未找到任何题目，可能页面加载失败")
                     return False
 
             total_questions = len(questions)
-
-            # 随机总作答时间
             total_time = random.randint(self.config["min_duration"], self.config["max_duration"])
             start_time = time.time()
+
+            # 计算每题平均时间
+            avg_time_per_question = total_time / total_questions
+            remaining_time = total_time
 
             for i, q in enumerate(questions):
                 if not self.running:
                     break
 
+                # 计算当前题目应花费的时间
+                if i == total_questions - 1:
+                    # 最后一题使用所有剩余时间
+                    question_time = remaining_time
+                else:
+                    # 为每题分配一个随机时间，但确保总时间符合要求
+                    question_time = min(
+                        random.uniform(avg_time_per_question * 0.5, avg_time_per_question * 1.5),
+                        remaining_time - (total_questions - i - 1)  # 确保留够时间给剩余题目
+                    )
+
+                question_start = time.time()
+
                 try:
                     q_type = q.get_attribute("type")
                     q_id = q.get_attribute("id")
-                    if q_id:
-                        q_num = q_id.replace("div", "")
-                    else:
-                        q_num = str(i + 1)
+                    q_num = q_id.replace("div", "") if q_id else str(i + 1)
 
                     # 更新题目进度
                     self.question_progress_var.set((i + 1) / total_questions * 100)
                     self.question_status_var.set(f"题目进度: {i + 1}/{total_questions}")
 
-                    # 随机等待时间
-                    per_question_delay = random.uniform(*self.config["per_question_delay"])
-                    time.sleep(per_question_delay)
-
-                    # 根据题型填写
-                    if q_type == "1":  # 填空题
+                    # 填写题目
+                    if q_type == "1":
                         self.fill_text(q, q_num)
-                    elif q_type == "2":  # 填空题（多行）
+                    elif q_type == "2":
                         self.fill_text(q, q_num)
-                    elif q_type == "3":  # 单选题
+                    elif q_type == "3":
                         self.fill_single(driver, q, q_num)
-                    elif q_type == "4":  # 多选题
+                    elif q_type == "4":
                         self.fill_multiple(driver, q, q_num)
-                    elif q_type == "5":  # 量表题
+                    elif q_type == "5":
                         self.fill_scale(driver, q, q_num)
-                    elif q_type == "6":  # 矩阵题
+                    elif q_type == "6":
                         self.fill_matrix(driver, q, q_num)
-                    elif q_type == "7":  # 下拉框
+                    elif q_type == "7":
                         self.fill_droplist(driver, q, q_num)
-                    elif q_type == "11":  # 排序题
+                    elif q_type == "11":
                         self.fill_reorder(driver, q, q_num)
                     else:
-                        # 尝试自动检测题型
                         self.auto_detect_question_type(driver, q, q_num)
+
+                    # 计算并等待剩余时间
+                    elapsed = time.time() - question_start
+                    if elapsed < question_time:
+                        time.sleep(question_time - elapsed)
+
+                    remaining_time -= time.time() - question_start
+
+                    # 检查翻页
+                    try:
+                        next_page = driver.find_element(By.CLASS_NAME, "next-page")
+                        if next_page.is_displayed():
+                            next_page.click()
+                            time.sleep(random.uniform(*self.config["per_page_delay"]))
+                    except:
+                        pass
 
                 except Exception as e:
                     logging.error(f"填写第{q_num}题时出错: {str(e)}")
                     continue
 
-                # 检查是否需要翻页
-                try:
-                    next_page = driver.find_element(By.CLASS_NAME, "next-page")
-                    if next_page.is_displayed():
-                        next_page.click()
-                        time.sleep(random.uniform(*self.config["per_page_delay"]))
-                except:
-                    pass
+            # 补足总时长
+            elapsed_total = time.time() - start_time
+            if elapsed_total < total_time:
+                time.sleep(total_time - elapsed_total)
 
-            # 补足剩余时间
-            elapsed_time = time.time() - start_time
-            if elapsed_time < total_time:
-                time.sleep(total_time - elapsed_time)
-
-            # 提交问卷 - 增强的提交逻辑
+            # 提交问卷
             return self.submit_survey(driver)
 
         except Exception as e:
