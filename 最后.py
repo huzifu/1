@@ -1809,6 +1809,7 @@ class WJXAutoFillApp:
 
         driver = None
         submit_count = 0
+        proxy_ip = None
 
         try:
             while self.running and self.cur_num < self.config["target_num"]:
@@ -1853,6 +1854,9 @@ class WJXAutoFillApp:
                         logging.error("本次未获取到有效代理，等待10秒后重试。")
                         time.sleep(10)
                         continue
+                elif use_ip and proxy_ip:
+                    # 批量切换时，未到N份，继续用已分配的IP
+                    options.add_argument(f'--proxy-server={proxy_ip}')
 
                 driver = webdriver.Chrome(options=options)
                 try:
