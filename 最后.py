@@ -40,6 +40,10 @@ DEFAULT_CONFIG = {
     "submit_delay": 3,
     "page_load_delay": 2,
     "per_question_delay": (1.0, 3.0),
+    "min_submit_gap": 10,  # 单份提交最小间隔（分钟）
+    "max_submit_gap": 20,  # 单份提交最大间隔（分钟）
+    "batch_size": 5,  # 每N份后暂停
+    "batch_pause": 15,  # 批量暂停M分钟
     "per_page_delay": (2.0, 6.0),
     "use_ip": False,
     "headless": False,
@@ -432,7 +436,7 @@ class WJXAutoFillApp:
         logging.info("应用程序已启动")
 
     def create_global_settings(self):
-        """创建全局设置界面"""
+        """创建全局设置界面，包括智能提交间隔和批量休息设置"""
         frame = self.global_frame
         padx, pady = 8, 5
 
@@ -457,7 +461,7 @@ class WJXAutoFillApp:
         font_frame.grid(row=0, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
 
         ttk.Label(font_frame, text="字体选择:").grid(row=0, column=0, padx=padx, pady=pady, sticky=tk.W)
-        font_options = tk.font.families()
+        font_options = tkfont.families()
         font_menu = ttk.Combobox(font_frame, textvariable=self.font_family, values=font_options, width=15)
         font_menu.grid(row=0, column=1, padx=padx, pady=pady, sticky=tk.W)
         font_menu.set("Arial")
@@ -471,38 +475,32 @@ class WJXAutoFillApp:
         survey_frame = ttk.LabelFrame(scrollable_frame, text="问卷设置")
         survey_frame.grid(row=1, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
 
-        # 第一列：问卷链接
         ttk.Label(survey_frame, text="问卷链接:").grid(row=0, column=0, padx=padx, pady=pady, sticky=tk.W)
-        self.url_entry = ttk.Entry(survey_frame, width=50)  # 减小宽度
-        self.url_entry.grid(row=0, column=1, columnspan=3, padx=padx, pady=pady, sticky=tk.EW)  # 跨3列
+        self.url_entry = ttk.Entry(survey_frame, width=50)
+        self.url_entry.grid(row=0, column=1, columnspan=3, padx=padx, pady=pady, sticky=tk.EW)
         self.url_entry.insert(0, self.config["url"])
 
-        # 第二行：目标份数和微信作答比率
         ttk.Label(survey_frame, text="目标份数:").grid(row=1, column=0, padx=padx, pady=pady, sticky=tk.W)
-        self.target_entry = ttk.Spinbox(survey_frame, from_=1, to=10000, width=8)  # 减小宽度
+        self.target_entry = ttk.Spinbox(survey_frame, from_=1, to=10000, width=8)
         self.target_entry.grid(row=1, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.target_entry.set(self.config["target_num"])
 
         ttk.Label(survey_frame, text="微信作答比率:").grid(row=1, column=2, padx=padx, pady=pady, sticky=tk.W)
-        self.ratio_scale = ttk.Scale(survey_frame, from_=0, to=1, orient=tk.HORIZONTAL, length=100)  # 减小长度
+        self.ratio_scale = ttk.Scale(survey_frame, from_=0, to=1, orient=tk.HORIZONTAL, length=100)
         self.ratio_scale.grid(row=1, column=3, padx=padx, pady=pady, sticky=tk.EW)
         self.ratio_scale.set(self.config["weixin_ratio"])
         self.ratio_var = tk.StringVar()
         self.ratio_var.set(f"{self.config['weixin_ratio'] * 100:.0f}%")
-        ratio_label = ttk.Label(survey_frame, textvariable=self.ratio_var, width=4)  # 减小宽度
+        ratio_label = ttk.Label(survey_frame, textvariable=self.ratio_var, width=4)
         ratio_label.grid(row=1, column=4, padx=(0, padx), pady=pady, sticky=tk.W)
-
-        # 绑定滑块事件
         self.ratio_scale.bind("<Motion>", self.update_ratio_display)
         self.ratio_scale.bind("<ButtonRelease-1>", self.update_ratio_display)
 
-        # 作答时长
         ttk.Label(survey_frame, text="作答时长(秒):").grid(row=2, column=0, padx=padx, pady=pady, sticky=tk.W)
         ttk.Label(survey_frame, text="最短:").grid(row=2, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.min_duration = ttk.Spinbox(survey_frame, from_=5, to=300, width=5)
         self.min_duration.grid(row=2, column=2, padx=padx, pady=pady, sticky=tk.W)
         self.min_duration.set(self.config["min_duration"])
-
         ttk.Label(survey_frame, text="最长:").grid(row=2, column=3, padx=padx, pady=pady, sticky=tk.W)
         self.max_duration = ttk.Spinbox(survey_frame, from_=5, to=300, width=5)
         self.max_duration.grid(row=2, column=4, padx=padx, pady=pady, sticky=tk.W)
@@ -511,60 +509,70 @@ class WJXAutoFillApp:
         # ======== 延迟设置 ========
         delay_frame = ttk.LabelFrame(scrollable_frame, text="延迟设置")
         delay_frame.grid(row=2, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
-
-        # 基础延迟
         ttk.Label(delay_frame, text="基础延迟(秒):").grid(row=0, column=0, padx=padx, pady=pady, sticky=tk.W)
         ttk.Label(delay_frame, text="最小:").grid(row=0, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.min_delay = ttk.Spinbox(delay_frame, from_=0.1, to=10, increment=0.1, width=5)
         self.min_delay.grid(row=0, column=2, padx=padx, pady=pady, sticky=tk.W)
         self.min_delay.set(self.config["min_delay"])
-
         ttk.Label(delay_frame, text="最大:").grid(row=0, column=3, padx=padx, pady=pady, sticky=tk.W)
         self.max_delay = ttk.Spinbox(delay_frame, from_=0.1, to=10, increment=0.1, width=5)
         self.max_delay.grid(row=0, column=4, padx=padx, pady=pady, sticky=tk.W)
         self.max_delay.set(self.config["max_delay"])
 
-        # 题目延迟
         ttk.Label(delay_frame, text="每题延迟(秒):").grid(row=1, column=0, padx=padx, pady=pady, sticky=tk.W)
         ttk.Label(delay_frame, text="最小:").grid(row=1, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.min_q_delay = ttk.Spinbox(delay_frame, from_=0.1, to=5, increment=0.1, width=5)
         self.min_q_delay.grid(row=1, column=2, padx=padx, pady=pady, sticky=tk.W)
         self.min_q_delay.set(self.config["per_question_delay"][0])
-
         ttk.Label(delay_frame, text="最大:").grid(row=1, column=3, padx=padx, pady=pady, sticky=tk.W)
         self.max_q_delay = ttk.Spinbox(delay_frame, from_=0.1, to=5, increment=0.1, width=5)
         self.max_q_delay.grid(row=1, column=4, padx=padx, pady=pady, sticky=tk.W)
         self.max_q_delay.set(self.config["per_question_delay"][1])
 
-        # 页面延迟
         ttk.Label(delay_frame, text="页面延迟(秒):").grid(row=2, column=0, padx=padx, pady=pady, sticky=tk.W)
         ttk.Label(delay_frame, text="最小:").grid(row=2, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.min_p_delay = ttk.Spinbox(delay_frame, from_=0.1, to=10, increment=0.1, width=5)
         self.min_p_delay.grid(row=2, column=2, padx=padx, pady=pady, sticky=tk.W)
         self.min_p_delay.set(self.config["per_page_delay"][0])
-
         ttk.Label(delay_frame, text="最大:").grid(row=2, column=3, padx=padx, pady=pady, sticky=tk.W)
         self.max_p_delay = ttk.Spinbox(delay_frame, from_=0.1, to=10, increment=0.1, width=5)
         self.max_p_delay.grid(row=2, column=4, padx=padx, pady=pady, sticky=tk.W)
         self.max_p_delay.set(self.config["per_page_delay"][1])
 
-        # 提交延迟
         ttk.Label(delay_frame, text="提交延迟:").grid(row=3, column=0, padx=padx, pady=pady, sticky=tk.W)
         self.submit_delay = ttk.Spinbox(delay_frame, from_=1, to=10, width=5)
         self.submit_delay.grid(row=3, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.submit_delay.set(self.config["submit_delay"])
 
+        # ======== 智能提交间隔设置 ========
+        smart_gap_frame = ttk.LabelFrame(scrollable_frame, text="智能提交间隔")
+        smart_gap_frame.grid(row=3, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
+        ttk.Label(smart_gap_frame, text="单份提交间隔(分钟):").grid(row=0, column=0, padx=padx, pady=pady, sticky=tk.W)
+        self.min_submit_gap = ttk.Spinbox(smart_gap_frame, from_=1, to=120, width=5)
+        self.min_submit_gap.grid(row=0, column=1, padx=padx, pady=pady, sticky=tk.W)
+        self.min_submit_gap.set(self.config.get("min_submit_gap", 10))
+        ttk.Label(smart_gap_frame, text="~").grid(row=0, column=2, padx=2, pady=pady, sticky=tk.W)
+        self.max_submit_gap = ttk.Spinbox(smart_gap_frame, from_=1, to=180, width=5)
+        self.max_submit_gap.grid(row=0, column=3, padx=padx, pady=pady, sticky=tk.W)
+        self.max_submit_gap.set(self.config.get("max_submit_gap", 20))
+
+        ttk.Label(smart_gap_frame, text="每").grid(row=1, column=0, padx=padx, pady=pady, sticky=tk.W)
+        self.batch_size = ttk.Spinbox(smart_gap_frame, from_=1, to=100, width=5)
+        self.batch_size.grid(row=1, column=1, padx=padx, pady=pady, sticky=tk.W)
+        self.batch_size.set(self.config.get("batch_size", 5))
+        ttk.Label(smart_gap_frame, text="份后暂停").grid(row=1, column=2, padx=2, pady=pady, sticky=tk.W)
+        self.batch_pause = ttk.Spinbox(smart_gap_frame, from_=1, to=120, width=5)
+        self.batch_pause.grid(row=1, column=3, padx=padx, pady=pady, sticky=tk.W)
+        self.batch_pause.set(self.config.get("batch_pause", 15))
+        ttk.Label(smart_gap_frame, text="分钟").grid(row=1, column=4, padx=2, pady=pady, sticky=tk.W)
+
         # ======== 高级设置 ========
         advanced_frame = ttk.LabelFrame(scrollable_frame, text="高级设置")
-        advanced_frame.grid(row=3, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
-
-        # 窗口数量
+        advanced_frame.grid(row=4, column=0, columnspan=2, padx=padx, pady=pady, sticky=tk.EW)
         ttk.Label(advanced_frame, text="浏览器窗口数量:").grid(row=0, column=0, padx=padx, pady=pady, sticky=tk.W)
         self.num_threads = ttk.Spinbox(advanced_frame, from_=1, to=10, width=5)
         self.num_threads.grid(row=0, column=1, padx=padx, pady=pady, sticky=tk.W)
         self.num_threads.set(self.config["num_threads"])
-
-        # IP设置
         self.use_ip_var = tk.BooleanVar(value=self.config["use_ip"])
         ttk.Checkbutton(advanced_frame, text="使用代理IP", variable=self.use_ip_var).grid(
             row=1, column=0, padx=padx, pady=pady, sticky=tk.W)
@@ -572,27 +580,19 @@ class WJXAutoFillApp:
         self.ip_entry = ttk.Entry(advanced_frame, width=40)
         self.ip_entry.grid(row=1, column=2, columnspan=3, padx=padx, pady=pady, sticky=tk.EW)
         self.ip_entry.insert(0, self.config["ip_api"])
-
-        # 无头模式
         self.headless_var = tk.BooleanVar(value=self.config["headless"])
         ttk.Checkbutton(advanced_frame, text="无头模式(不显示浏览器)", variable=self.headless_var).grid(
             row=2, column=0, padx=padx, pady=pady, sticky=tk.W)
 
         # ======== 操作按钮 ========
         button_frame = ttk.Frame(scrollable_frame)
-        button_frame.grid(row=4, column=0, columnspan=2, pady=10, sticky=tk.W)
-
-        # 解析问卷按钮
+        button_frame.grid(row=5, column=0, columnspan=2, pady=10, sticky=tk.W)
         self.parse_btn = ttk.Button(button_frame, text="解析问卷", command=self.parse_survey, width=15)
         self.parse_btn.grid(row=0, column=0, padx=5)
-
-        # 重置默认按钮
         ttk.Button(button_frame, text="重置默认", command=self.reset_defaults, width=15).grid(row=0, column=1, padx=5)
-        # 确保滚动框架有正确的权重分配
         scrollable_frame.columnconfigure(0, weight=1)
-        # 提示标签
         tip_label = ttk.Label(scrollable_frame, text="提示: 填写前请先解析问卷以获取题目结构", style='Warning.TLabel')
-        tip_label.grid(row=5, column=0, columnspan=2, pady=(10, 0))
+        tip_label.grid(row=6, column=0, columnspan=2, pady=(10, 0))
 
     def _process_parsed_questions(self, questions_data):
         """处理解析得到的问卷题目数据"""
@@ -1790,7 +1790,11 @@ class WJXAutoFillApp:
             messagebox.showerror("错误", f"启动失败: {str(e)}")
 
     def run_filling(self, x=0, y=0):
-        """运行填写任务 - 优化版本"""
+        """运行填写任务 - 含智能提交间隔和批量休息机制"""
+        import random
+        import time
+        from selenium import webdriver
+
         options = webdriver.ChromeOptions()
         if self.config["headless"]:
             options.add_argument('--headless')
@@ -1803,7 +1807,6 @@ class WJXAutoFillApp:
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-        # 添加其他必要参数
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
@@ -1819,6 +1822,7 @@ class WJXAutoFillApp:
                 # 获取代理IP
                 if self.config["use_ip"]:
                     try:
+                        import requests
                         response = requests.get(self.config["ip_api"], timeout=10)
                         ip = response.text.strip()
                         options.add_argument(f'--proxy-server={ip}')
@@ -1837,7 +1841,9 @@ class WJXAutoFillApp:
                     use_weixin = random.random() < self.config["weixin_ratio"]
                     if use_weixin:
                         try:
-                            # 更健壮的微信作答按钮定位
+                            from selenium.webdriver.common.by import By
+                            from selenium.webdriver.support.ui import WebDriverWait
+                            from selenium.webdriver.support import expected_conditions as EC
                             weixin_btn = WebDriverWait(driver, 3).until(
                                 EC.element_to_be_clickable((By.CLASS_NAME, "weixin-answer"))
                             )
@@ -1861,6 +1867,7 @@ class WJXAutoFillApp:
                     with self.lock:
                         self.cur_fail += 1
                     logging.error(f"填写问卷时出错: {str(e)}")
+                    import traceback
                     traceback.print_exc()
 
                 finally:
@@ -1869,12 +1876,29 @@ class WJXAutoFillApp:
                     except:
                         pass
 
-                # 随机等待
-                if self.running:
-                    time.sleep(random.uniform(
-                        self.config["min_delay"],
-                        self.config["max_delay"]))
-
+                # 智能提交间隔/批量休息机制
+                if self.running and self.cur_num < self.config["target_num"]:
+                    # 批量休息
+                    batch_size = self.config.get("batch_size", 0)
+                    batch_pause = self.config.get("batch_pause", 0)
+                    if batch_size > 0 and self.cur_num % batch_size == 0:
+                        logging.info(f"已完成{self.cur_num}份，批量休息{batch_pause}分钟...")
+                        for i in range(int(batch_pause * 60)):
+                            if not self.running:
+                                break
+                            time.sleep(1)
+                    else:
+                        # 单份随机间隔
+                        min_gap = self.config.get("min_submit_gap", 10)
+                        max_gap = self.config.get("max_submit_gap", 20)
+                        if min_gap > max_gap:
+                            min_gap, max_gap = max_gap, min_gap
+                        submit_interval = random.uniform(min_gap, max_gap) * 60
+                        logging.info(f"本次提交后等待{submit_interval / 60:.2f}分钟...")
+                        for i in range(int(submit_interval)):
+                            if not self.running:
+                                break
+                            time.sleep(1)
         except Exception as e:
             logging.error(f"运行任务时出错: {str(e)}")
         finally:
@@ -2688,13 +2712,16 @@ class WJXAutoFillApp:
             self.headless_var.set(self.config["headless"])
             self.ip_entry.delete(0, tk.END)
             self.ip_entry.insert(0, self.config["ip_api"])
-
+            self.min_submit_gap.set(self.config["min_submit_gap"])
+            self.max_submit_gap.set(self.config["max_submit_gap"])
+            self.batch_size.set(self.config["batch_size"])
+            self.batch_pause.set(self.config["batch_pause"])
             # 重新加载题型设置
             self.reload_question_settings()
             logging.info("已重置为默认配置")
 
     def save_config(self):
-        """保存当前界面配置到self.config - 优化版本"""
+        """保存当前界面配置到self.config - 含智能提交间隔和批量休息设置"""
         try:
             # 全局设置
             self.config["url"] = self.url_entry.get().strip()
@@ -2711,8 +2738,6 @@ class WJXAutoFillApp:
                 self.config["min_delay"] = float(self.min_delay.get())
                 self.config["max_delay"] = float(self.max_delay.get())
                 self.config["submit_delay"] = int(self.submit_delay.get())
-
-                # 处理元组类型的配置
                 self.config["per_question_delay"] = (
                     float(self.min_q_delay.get()),
                     float(self.max_q_delay.get())
@@ -2721,10 +2746,8 @@ class WJXAutoFillApp:
                     float(self.min_p_delay.get()),
                     float(self.max_p_delay.get())
                 )
-
                 self.config["num_threads"] = int(self.num_threads.get())
             except ValueError:
-                # 使用默认值
                 self.config.update({
                     "min_duration": DEFAULT_CONFIG["min_duration"],
                     "max_duration": DEFAULT_CONFIG["max_duration"],
@@ -2739,6 +2762,18 @@ class WJXAutoFillApp:
             self.config["use_ip"] = self.use_ip_var.get()
             self.config["headless"] = self.headless_var.get()
             self.config["ip_api"] = self.ip_entry.get().strip()
+
+            # 智能提交间隔和批量休息设置
+            try:
+                self.config["min_submit_gap"] = float(self.min_submit_gap.get())
+                self.config["max_submit_gap"] = float(self.max_submit_gap.get())
+                self.config["batch_size"] = int(self.batch_size.get())
+                self.config["batch_pause"] = float(self.batch_pause.get())
+            except Exception:
+                self.config["min_submit_gap"] = DEFAULT_CONFIG["min_submit_gap"]
+                self.config["max_submit_gap"] = DEFAULT_CONFIG["max_submit_gap"]
+                self.config["batch_size"] = DEFAULT_CONFIG["batch_size"]
+                self.config["batch_pause"] = DEFAULT_CONFIG["batch_pause"]
 
             # 单选题配置
             for i, (q_num, _) in enumerate(self.config["single_prob"].items()):
@@ -2762,7 +2797,6 @@ class WJXAutoFillApp:
                 if i < len(self.min_selection_entries) and i < len(self.max_selection_entries):
                     min_val = int(self.min_selection_entries[i].get())
                     max_val = int(self.max_selection_entries[i].get())
-
                     if i < len(self.multi_entries):
                         entries = self.multi_entries[i]
                         probs = []
@@ -2771,7 +2805,6 @@ class WJXAutoFillApp:
                                 probs.append(int(entry.get()))
                             except:
                                 probs.append(50)
-
                         self.config["multiple_prob"][q_num] = {
                             "prob": probs,
                             "min_selection": min_val,
