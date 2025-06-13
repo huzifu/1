@@ -2133,69 +2133,163 @@ class WJXAutoFillApp:
 
     def auto_fill_question(self, driver, question):
         """
-        根据题型自动补全一个问题，兜底版，确保多选题中的'其他'文本必填
+        自动补全问题 - 修复版，确保多选题中的'其他'文本必填
         """
         import random
+        from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import StaleElementReferenceException
+
         try:
-            # 单选题
-            radios = question.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-            if radios:
-                random.choice(radios).click()
-                return
-            # 多选题
-            checks = question.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
-            if checks:
-                # 勾选一个
-                random.choice(checks).click()
-                # 检查是否有“其他”选项被选中未填
-                option_labels = []
-                label_elems = question.find_elements(By.CSS_SELECTOR, "label")
-                for el in label_elems:
-                    txt = el.text.strip()
-                    if txt:
-                        option_labels.append(txt)
-                    else:
-                        spans = el.find_elements(By.CSS_SELECTOR, "span")
-                        if spans:
-                            option_labels.append(spans[0].text.strip())
-                        else:
+            # 1. 单选题
+            try:
+                radios = question.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+                if radios:
+                    random.choice(radios).click()
+                    return
+            except StaleElementReferenceException:
+                pass
+
+            # 2. 多选题
+            try:
+                checks = question.find_elements(By.CSS_SELECTOR, "input[type='checkbox']")
+                if checks:
+                    # 随机勾选一个
+                    chosen = random.choice(checks)
+                    try:
+                        chosen.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", chosen)
+
+                    # 获取选项文本
+                    option_labels = []
+                    label_elems = question.find_elements(By.CSS_SELECTOR, "label")
+                    for el in label_elems:
+                        try:
+                            txt = el.text.strip()
+                            if not txt:
+                                spans = el.find_elements(By.CSS_SELECTOR, "span")
+                                if spans:
+                                    txt = spans[0].text.strip()
+                            option_labels.append(txt)
+                        except StaleElementReferenceException:
                             option_labels.append("")
-                for idx, chk in enumerate(checks):
-                    if chk.is_selected():
-                        label_text = option_labels[idx] if idx < len(option_labels) else ""
-                        if "其他" in label_text or "other" in label_text.lower():
-                            # 找对应文本框
-                            other_inputs = question.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-                            for inp in other_inputs:
-                                if not inp.get_attribute("value") and inp.is_displayed():
-                                    try:
-                                        inp.clear()
-                                    except:
-                                        pass
-                                    inp.send_keys("自动补全内容")
-                                    print("兜底补了‘其他’文本框")
+
+                    # 检查是否有"其他"选项被选中
+                    chose_other = False
+                    for idx, chk in enumerate(checks):
+                        try:
+                            if chk.is_selected() and idx < len(option_labels):
+                                label_text = option_labels[idx]
+                                if "其他" in label_text or "other" in label_text.lower():
+                                    chose_other = True
                                     break
-                            break
-                return
-            # 填空题
-            texts = question.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-            if texts:
-                for t in texts:
-                    if not t.get_attribute("value"):
-                        t.send_keys("自动补全内容")
-                return
-            # 下拉框
-            selects = question.find_elements(By.CSS_SELECTOR, "select")
-            if selects:
-                for sel in selects:
-                    options = sel.find_elements(By.TAG_NAME, "option")
-                    for op in options:
-                        if op.get_attribute("value") and not op.get_attribute("disabled"):
-                            sel.send_keys(op.get_attribute("value"))
-                            break
-                return
+                        except:
+                            continue
+
+                    # 如果选中了"其他"选项，填写文本框
+                    if chose_other:
+                        # 增强定位策略
+                        locator_strategies = [
+                            (By.XPATH, f".//input[preceding-sibling::label[contains(., '其他')]]"),
+                            (By.CSS_SELECTOR, "input[placeholder*='其他'], input[placeholder*='请填写']"),
+                            (By.CLASS_NAME, "OtherText"),
+                            (By.XPATH, ".//div[contains(@class, 'other')]//input"),
+                            (By.CSS_SELECTOR, "input[type='text'], textarea")
+                        ]
+
+                        other_inputs = []
+                        for strategy in locator_strategies:
+                            try:
+                                found_inputs = question.find_elements(strategy[0], strategy[1])
+                                if found_inputs:
+                                    other_inputs = found_inputs
+                                    break
+                            except:
+                                continue
+
+                        # 全局查找
+                        if not other_inputs:
+                            for strategy in locator_strategies:
+                                try:
+                                    found_inputs = driver.find_elements(strategy[0], strategy[1])
+                                    if found_inputs:
+                                        other_inputs = found_inputs
+                                        break
+                                except:
+                                    continue
+
+                        # 填写找到的第一个可见文本框
+                        for inp in other_inputs:
+                            try:
+                                if inp.is_displayed() and not inp.get_attribute("value"):
+                                    try:
+                                        inp.send_keys("自动补全内容")
+                                        logging.info("成功补全'其他'文本框")
+                                        break
+                                    except:
+                                        try:
+                                            driver.execute_script("arguments[0].value = '自动补全内容';", inp)
+                                            logging.info("通过JS补全'其他'文本框")
+                                            break
+                                        except:
+                                            pass
+                            except:
+                                continue
+                    return
+            except StaleElementReferenceException:
+                pass
+
+            # 3. 填空题
+            try:
+                texts = question.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
+                if texts:
+                    for t in texts:
+                        if not t.get_attribute("value") and t.is_displayed():
+                            try:
+                                t.send_keys("自动补全内容")
+                            except:
+                                try:
+                                    driver.execute_script("arguments[0].value = '自动补全内容';", t)
+                                except:
+                                    pass
+                    return
+            except StaleElementReferenceException:
+                pass
+
+            # 4. 下拉框
+            try:
+                selects = question.find_elements(By.CSS_SELECTOR, "select")
+                if selects:
+                    for sel in selects:
+                        options = sel.find_elements(By.TAG_NAME, "option")
+                        for op in options:
+                            try:
+                                if op.get_attribute("value") and not op.get_attribute("disabled"):
+                                    sel.send_keys(op.get_attribute("value"))
+                                    break
+                            except:
+                                continue
+                    return
+            except StaleElementReferenceException:
+                pass
+
+            # 5. 最后尝试：点击任何可点击元素
+            try:
+                clickable_elements = question.find_elements(By.CSS_SELECTOR,
+                                                            "li, label, div[onclick], span[onclick], .option")
+                if clickable_elements:
+                    element = random.choice(clickable_elements)
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                                          element)
+                    time.sleep(0.2)
+                    element.click()
+                    return
+            except StaleElementReferenceException:
+                pass
+
+            logging.warning("无法自动补全问题")
         except Exception as e:
-            print(f"自动补全题目时出错: {e}")
+            logging.error(f"自动补全题目时出错: {str(e)}")
 
     def submit_survey(self, driver):
         """
@@ -2551,10 +2645,11 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        多选题自动填写（含“其他”文本框填充，兼容问卷星），只填当前题目下的“其他”输入框。
+        多选题自动填写，支持概率/必选/随机，并对“其他”文本框强力写入（兼容问卷星所有新老页面）。
         """
         import random, time
         from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import StaleElementReferenceException
 
         # 1. 查找checkbox选项
         selectors = [
@@ -2565,16 +2660,24 @@ class WJXAutoFillApp:
         ]
         options = []
         for sel in selectors:
-            options = question.find_elements(By.CSS_SELECTOR, sel)
-            if options:
-                break
+            try:
+                options = question.find_elements(By.CSS_SELECTOR, sel)
+                if options:
+                    break
+            except StaleElementReferenceException:
+                # 如果元素过时，重新查找
+                continue
+
         if not options:
-            print(f"多选题{q_num}未找到有效选项，自动跳过")
+            logging.warning(f"多选题{q_num}未找到选项，跳过")
             return
 
         q_key = str(q_num)
-        config = self.config.get("multiple_prob", {}).get(q_key, {"prob": [50] * len(options), "min_selection": 1,
-                                                                  "max_selection": len(options)})
+        config = self.config.get("multiple_prob", {}).get(q_key, {
+            "prob": [50] * len(options),
+            "min_selection": 1,
+            "max_selection": len(options)
+        })
         probs = config.get("prob", [50] * len(options))
         min_selection = config.get("min_selection", 1)
         max_selection = config.get("max_selection", len(options))
@@ -2582,7 +2685,7 @@ class WJXAutoFillApp:
         if min_selection > max_selection: min_selection = max_selection
         probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-        # 2. 确定要勾选哪些
+        # 算法决定要选哪些
         must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
         selected_indices = list(must_indices)
         for i, prob in enumerate(probs):
@@ -2594,69 +2697,138 @@ class WJXAutoFillApp:
             selected_indices.append(random.choice(left))
         while len(selected_indices) > max_selection:
             removable = [i for i in selected_indices if i not in must_indices]
-            if not removable:
-                break
+            if not removable: break
             selected_indices.remove(random.choice(removable))
 
-        # 3. 勾选所有选项，同时记录“其他”选项的index
+        # 获取选项文本
+        option_labels = []
         label_elems = question.find_elements(By.CSS_SELECTOR, "label")
+        for idx, el in enumerate(label_elems):
+            try:
+                txt = el.text.strip()
+                if not txt:
+                    spans = el.find_elements(By.CSS_SELECTOR, "span")
+                    if spans:
+                        txt = spans[0].text.strip()
+                option_labels.append(txt)
+            except StaleElementReferenceException:
+                option_labels.append(f"选项{idx + 1}")
+
+        # 选中所有选项（含"其他"）
         chose_other = False
-        other_index = None
         for idx in selected_indices:
             try:
+                if idx >= len(options):
+                    continue
+
                 driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
                                       options[idx])
                 options[idx].click()
-                label_txt = ""
-                if idx < len(label_elems):
-                    label_txt = label_elems[idx].text.strip()
-                    if not label_txt:
-                        spans = label_elems[idx].find_elements(By.CSS_SELECTOR, "span")
-                        if spans:
-                            label_txt = spans[0].text.strip()
-                if "其他" in label_txt or "other" in label_txt.lower():
+
+                # 检查是否选中了"其他"选项
+                if idx < len(option_labels) and ("其他" in option_labels[idx] or "other" in option_labels[idx].lower()):
                     chose_other = True
-                    other_index = idx
-                    time.sleep(1.0)
-            except Exception:
+                    time.sleep(1)  # 等待文本框出现
+            except Exception as e:
+                logging.warning(f"选择选项时出错: {str(e)}")
                 try:
                     driver.execute_script("arguments[0].click();", options[idx])
                 except Exception:
-                    driver.execute_script("arguments[0].checked = true;", options[idx])
+                    try:
+                        driver.execute_script("arguments[0].checked = true;", options[idx])
+                    except:
+                        pass
 
-        # 4. 只填当前题目下的“其他”文本框（而不是全局）
+        # --- 核心：强力写入"其他"文本框 ---
         if chose_other:
-            # 获取“其他”内容
             other_list = self.config.get("other_texts", {}).get(q_key, ["自动填写内容"])
             other_content = random.choice(other_list) if other_list else "自动填写内容"
-            # 等待文本框渲染
-            time.sleep(0.5)
-            # 只在当前question下找input.OtherText
-            other_inputs = question.find_elements(By.CSS_SELECTOR, "input.OtherText")
+            time.sleep(1)  # 确保文本框完全加载
+
+            # 增强定位逻辑：多种定位策略
+            locator_strategies = [
+                # 策略1：通过相邻元素定位
+                (By.XPATH, f".//input[preceding-sibling::label[contains(., '其他')]]"),
+                # 策略2：通过特定属性定位
+                (By.CSS_SELECTOR, "input[placeholder*='其他'], input[placeholder*='请填写']"),
+                # 策略3：通过类名定位（兼容旧版）
+                (By.CLASS_NAME, "OtherText"),
+                # 策略4：通过父元素关系定位
+                (By.XPATH, ".//div[contains(@class, 'other')]//input"),
+                # 策略5：通用文本输入框
+                (By.CSS_SELECTOR, "input[type='text'], textarea")
+            ]
+
+            # 尝试所有定位策略
+            other_inputs = []
+            for strategy in locator_strategies:
+                try:
+                    found_inputs = question.find_elements(strategy[0], strategy[1])
+                    if found_inputs:
+                        other_inputs = found_inputs
+                        logging.debug(f"使用策略 {strategy} 找到 {len(found_inputs)} 个输入框")
+                        break
+                except Exception as e:
+                    logging.debug(f"定位策略 {strategy} 失败: {str(e)}")
+                    continue
+
+            # 如果没有找到，尝试在全局查找
+            if not other_inputs:
+                for strategy in locator_strategies:
+                    try:
+                        found_inputs = driver.find_elements(strategy[0], strategy[1])
+                        if found_inputs:
+                            other_inputs = found_inputs
+                            logging.debug(f"全局使用策略 {strategy} 找到 {len(found_inputs)} 个输入框")
+                            break
+                    except:
+                        continue
+
+            # 填写找到的第一个可见文本框
+            filled = False
             for inp in other_inputs:
-                if inp.is_displayed():
+                try:
+                    if not inp.is_displayed():
+                        continue
+
+                    logging.debug(f"尝试填写'其他'文本框: {inp.get_attribute('outerHTML')[:100]}")
+
+                    # 方法1: 常规方式输入
                     try:
                         inp.clear()
                         inp.send_keys(other_content)
-                    except Exception:
-                        # send_keys不行则用JS赋值
-                        driver.execute_script("""
-                            arguments[0].value = arguments[1];
-                            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                        """, inp, other_content)
-                    break  # 一般只填一个
-            else:
-                # 兜底：如果没找到，尝试全局填一下（极端情况）
-                driver.execute_script("""
-                    document.querySelectorAll('input.OtherText').forEach(function(input){
-                        if (input.offsetParent !== null) {
-                            input.value = arguments[0];
-                            input.dispatchEvent(new Event('input', { bubbles: true }));
-                            input.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                    });
-                """, other_content)
+                        time.sleep(0.3)
+
+                        # 检查是否成功
+                        if inp.get_attribute("value") == other_content:
+                            logging.info(f"题目{q_num}：成功填写'其他'文本框")
+                            filled = True
+                            break
+                    except Exception as e:
+                        logging.debug(f"常规输入失败: {str(e)}")
+
+                    # 方法2: JavaScript强制注入
+                    driver.execute_script("""
+                        arguments[0].value = arguments[1];
+                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                    """, inp, other_content)
+
+                    time.sleep(0.3)
+                    # 验证值是否设置成功
+                    actual_value = driver.execute_script("return arguments[0].value", inp)
+                    if actual_value == other_content:
+                        logging.info(f"题目{q_num}：通过JS成功填写'其他'文本框")
+                        filled = True
+                        break
+                    else:
+                        logging.warning(
+                            f"题目{q_num}：'其他'文本框填写失败 (预期: '{other_content}', 实际: '{actual_value}')")
+                except Exception as e:
+                    logging.error(f"填写'其他'文本框时出错: {str(e)}")
+
+            if not filled:
+                logging.warning(f"题目{q_num}：未找到或无法填写'其他'文本框")
 
         self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
 
