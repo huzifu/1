@@ -1,4 +1,4 @@
-import tkinter as tk
+    import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
@@ -962,7 +962,7 @@ class WJXAutoFillApp:
             self.root.after(0, lambda: self.status_indicator.config(foreground="green"))
 
     def create_single_settings(self, frame):
-        """创建单选题设置界面 - 修复输入框显示问题"""
+        """创建单选题设置界面 - 输入框数量严格等于选项数量"""
         padx, pady = 8, 5
         # 配置说明框架
         desc_frame = ttk.LabelFrame(frame, text="单选题配置说明")
@@ -971,13 +971,13 @@ class WJXAutoFillApp:
         ttk.Label(desc_frame, text="• 输入 -1 表示随机选择\n• 输入正数表示选项的相对权重",
                   justify=tk.LEFT, font=("Arial", 9)).pack(anchor=tk.W, padx=5)
 
-        # 创建表格框架并设置列权重 - 修复列宽问题
+        # 创建表格框架并设置列权重
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         table_frame.columnconfigure(0, weight=1)  # 题号列
         table_frame.columnconfigure(1, weight=3)  # 题目预览列
-        table_frame.columnconfigure(2, weight=8)  # 选项权重配置列（增加权重）
+        table_frame.columnconfigure(2, weight=8)  # 选项权重配置列
         table_frame.columnconfigure(3, weight=2)  # 操作列
 
         # 表头
@@ -990,12 +990,10 @@ class WJXAutoFillApp:
             base_row = row_idx
             q_text = self.config["question_texts"].get(q_num, f"单选题 {q_num}")
 
+            # 关键：严格用选项数量决定输入框数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and isinstance(probs, list):
-                option_count = len(probs)
-            # 修复关键：保证至少有一个输入框出现
             if option_count == 0:
-                option_count = 1
+                option_count = 1  # 防止解析失败时至少有一个输入框
 
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
@@ -1058,7 +1056,6 @@ class WJXAutoFillApp:
             if row_idx < len(self.config["single_prob"]):
                 ttk.Separator(table_frame, orient='horizontal').grid(
                     row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
-
 
     def create_multi_settings(self, frame):
         """创建多选题设置界面 - 完整修复版本"""
