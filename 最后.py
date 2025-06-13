@@ -9,10 +9,6 @@ import traceback
 import time
 import numpy as np
 import requests
-import requests
-import time
-import logging
-import re
 import json
 import os
 from typing import List, Dict, Any
@@ -160,53 +156,6 @@ DEFAULT_CONFIG = {
 }
 
 
-
-class ProxyManager:
-    def __init__(self, ip_api, mode="per_submit", batch_size=5):
-        self.ip_api = ip_api
-        self.mode = mode
-        self.batch_size = batch_size
-        self.ip = None
-        self.last_used = 0
-        self.usage_count = 0
-
-    @staticmethod
-    def validate(ip):
-        ip_pattern = r"^https?://((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):(\d{1,5})$"
-        return bool(re.match(ip_pattern, ip))
-
-    def get_new_proxy(self):
-        try:
-            resp = requests.get(self.ip_api, timeout=8)
-            ip = resp.text.strip()
-            if ip and not ip.startswith("http"):
-                ip = "http://" + ip
-            if self.validate(ip):
-                self.ip = ip
-                self.last_used = time.time()
-                self.usage_count = 0
-                logging.info(f"获取到新代理IP: {ip}")
-                return ip
-            else:
-                logging.error(f"拉取到的IP格式无效: {ip}")
-                return None
-        except Exception as e:
-            logging.error(f"拉取代理IP出错: {e}")
-            return None
-
-    def should_switch(self):
-        if self.mode == "per_submit":
-            return True
-        elif self.mode == "per_batch":
-            return self.usage_count % self.batch_size == 0
-        return False
-
-    def get_proxy_for_submit(self):
-        if self.ip is None or self.should_switch():
-            return self.get_new_proxy()
-        else:
-            self.usage_count += 1
-            return self.ip
 # ToolTip类用于显示题目提示
 class ToolTip:
     def __init__(self, widget, text='', delay=300, wraplength=500):  # 减少延迟，增加宽度
@@ -1846,17 +1795,8 @@ class WJXAutoFillApp:
         self.root.update_idletasks()
 
     def start_filling(self):
-        """开始填写问卷，集成代理IP自动获取及切换"""
+        """开始填写问卷"""
         try:
-            # ============== 代理IP管理器初始化 ==============
-            # 集成ProxyManager（假设ProxyManager已在文件顶部定义并已import）
-            self.proxy_mgr = ProxyManager(
-                ip_api=self.config["ip_api"],
-                mode=self.config.get("ip_change_mode", "per_submit"),
-                batch_size=self.config.get("ip_change_batch", 5)
-            )
-            # ============== 代理IP管理器初始化 END ==============
-
             # 保存当前配置
             if not self.save_config():
                 return
@@ -1917,7 +1857,6 @@ class WJXAutoFillApp:
     def run_filling(self, x=0, y=0):
         """
         运行填写任务 - 可用微信作答比率滑动条控制微信来源填写比例
-        集成ProxyManager自动获取及切换代理IP
         """
         import random
         import time
@@ -1947,6 +1886,7 @@ class WJXAutoFillApp:
                     continue
 
                 # 1. 用滑动条控制微信来源比例
+                # self.config["weixin_ratio"]已实时跟随滑动条
                 use_weixin = random.random() < float(self.config.get("weixin_ratio", 0.5))
 
                 # 2. 配置chromedriver选项
@@ -1964,12 +1904,19 @@ class WJXAutoFillApp:
                 else:
                     options.add_argument(f'--window-position={x},{y}')
 
-                # 3. 代理设置（集成ProxyManager）
+                # 3. 代理设置
                 use_ip = self.config.get("use_ip", False)
-                proxy_ip = None
+                ip_mode = self.config.get("ip_change_mode", "per_submit")
+                ip_batch = self.config.get("ip_change_batch", 5)
+                need_new_proxy = False
                 if use_ip:
-                    # 强制每次都用ProxyManager统一逻辑
-                    proxy_ip = self.proxy_mgr.get_proxy_for_submit()
+                    if ip_mode == "per_submit":
+                        need_new_proxy = True
+                    elif ip_mode == "per_batch":
+                        if submit_count % ip_batch == 0:
+                            need_new_proxy = True
+                if use_ip and need_new_proxy:
+                    proxy_ip = self.get_new_proxy()
                     if proxy_ip:
                         logging.info(f"使用代理: {proxy_ip}")
                         options.add_argument(f'--proxy-server={proxy_ip}')
@@ -1977,6 +1924,8 @@ class WJXAutoFillApp:
                         logging.error("本次未获取到有效代理，等待10秒后重试。")
                         time.sleep(10)
                         continue
+                elif use_ip and proxy_ip:
+                    options.add_argument(f'--proxy-server={proxy_ip}')
 
                 driver = webdriver.Chrome(options=options)
                 try:
@@ -1986,6 +1935,8 @@ class WJXAutoFillApp:
                             driver.set_window_size(375, 812)
                         else:
                             driver.set_window_size(1024, 768)
+
+
 
                     driver.get(self.config["url"])
                     time.sleep(self.config["page_load_delay"])
@@ -2354,11 +2305,10 @@ class WJXAutoFillApp:
 
     def submit_survey(self, driver):
         """
-        智能增强版问卷提交，极力提升成功率，减少‘假成功’：
-        - 多方式判定（url/文本/感谢页/错误提示）
+        智能增强版问卷提交，极力提升成功率：
+        - 多方式判定（url/文本/感谢页）
         - 多轮提交重试、弹窗/验证码/必答自动修复
         - 每轮都判断页面跳转与成功信号
-        - 失败时不计入成功数
         """
         import time
         from selenium.webdriver.common.by import By
@@ -2366,35 +2316,26 @@ class WJXAutoFillApp:
         from selenium.webdriver.support import expected_conditions as EC
 
         def is_submit_success(driver):
-            url = driver.current_url.lower()
-            page = driver.page_source.lower()
-            # URL包含感谢、complete、success等
-            url_success = any(k in url for k in ["complete", "success", "finish", "thank"])
-            # 页面含感谢词等
-            page_success = any(k in page for k in ["感谢", "提交成功", "问卷已完成", "谢谢您的参与", "再次填写"])
-            # 特定感谢元素
-            success_selectors = [
-                "div.complete", ".survey-success", ".end-page", ".finish-container", ".thank-you-page"
-            ]
-            elem_success = False
-            for sel in success_selectors:
-                try:
-                    if driver.find_element(By.CSS_SELECTOR, sel).is_displayed():
-                        elem_success = True
-                        break
-                except:
-                    pass
-            # 页面出现明显错误、风控、验证码、未提交等
-            error_keys = [
-                "异常", "验证码", "提交失败", "风控", "操作频繁", "请填写", "请勿刷新", "提交次数过多", "您已提交",
-                "验证失败", "请完成验证", "出现错误", "请重新填写", "请勿重复提交", "系统检测到异常", "网络异常"
-            ]
-            error_found = any(k in page for k in error_keys)
-            # 跳到首页/提示未提交
-            home_keys = ["/wjx.cn/login", "/wjx.cn/index", "/wjx.cn/user", "重新填写"]
-            home_found = any(k in url for k in home_keys)
-            # 最终判定
-            return (url_success or page_success or elem_success) and not (error_found or home_found)
+            try:
+                url = driver.current_url.lower()
+                page = driver.page_source.lower()
+                success_keys = ["感谢", "提交成功", "问卷已完成", "谢谢您的参与", "再次填写"]
+                if any(k in url for k in ["complete", "success", "finish", "thank"]):
+                    return True
+                if any(k in page for k in success_keys):
+                    return True
+                # 也可判定常见感谢页面元素
+                for sel in [
+                    "div.complete", ".survey-success", ".end-page", ".finish-container", ".thank-you-page"
+                ]:
+                    try:
+                        if driver.find_element(By.CSS_SELECTOR, sel).is_displayed():
+                            return True
+                    except:
+                        pass
+                return False
+            except Exception:
+                return False
 
         max_retries = 4
         for attempt in range(max_retries):
@@ -2430,7 +2371,7 @@ class WJXAutoFillApp:
                             driver.execute_script("arguments[0].click();", submit_btn)
                         except Exception:
                             pass
-                    time.sleep(1.5)
+                    time.sleep(1.2)
                 else:
                     try:
                         form = driver.find_element(By.TAG_NAME, "form")
@@ -2473,18 +2414,10 @@ class WJXAutoFillApp:
                     pass
 
                 # ---- 4. 判定是否提交成功（多轮判定）----
-                for i in range(10):  # 最多10秒，每秒判定一次
+                for i in range(8):  # 最多8秒，每秒判定一次
                     if is_submit_success(driver):
-                        # 二次判定：尝试重新访问问卷首页，若可直接填写，上一份多半未入库
-                        try:
-                            driver.get(self.config["url"])
-                            time.sleep(2)
-                            page = driver.page_source.lower()
-                            if any(k in page for k in ["您已提交", "感谢您的参与", "问卷已完成"]):
-                                return True  # 真的已入库
-                        except Exception:
-                            pass
-                        return True  # 允许部分问卷星跳转后不能再访问
+                        print("问卷提交成功！")
+                        return True
                     time.sleep(1)
 
                 # ---- 5. 检查是否需补填 ----
@@ -2493,8 +2426,7 @@ class WJXAutoFillApp:
                     print("页面出现验证码，请手动处理后继续。")
                     time.sleep(8)
                     continue
-                if any(word in page_text for word in
-                       ["还有必答题", "请填写", "错误", "失败", "必答", "未完成", "请填写完整", "不能为空"]):
+                if any(word in page_text for word in ["还有必答题", "请填写", "错误", "失败", "必答"]):
                     print("页面提示填写不全或有错误，尝试自动补全。")
                     self.repair_required_questions(driver)
                     time.sleep(1.2)
@@ -2505,12 +2437,6 @@ class WJXAutoFillApp:
             except Exception as e:
                 print(f"提交问卷异常: {e}")
                 time.sleep(2)
-        # 失败后可记录页面源码便于排查
-        try:
-            with open(f"fail_page_{int(time.time())}.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
-        except Exception:
-            pass
         print("多次重试后提交仍未成功！")
         return False
 
