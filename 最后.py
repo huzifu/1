@@ -1855,7 +1855,9 @@ class WJXAutoFillApp:
             messagebox.showerror("错误", f"启动失败: {str(e)}")
 
     def run_filling(self, x=0, y=0):
-        """运行填写任务 - 含智能提交间隔/批量休息开关、代理自动切换，微信比率修正版"""
+        """
+        运行填写任务 - 可用微信作答比率滑动条控制微信来源填写比例
+        """
         import random
         import time
         from selenium import webdriver
@@ -1864,40 +1866,55 @@ class WJXAutoFillApp:
         submit_count = 0
         proxy_ip = None
 
+        # 微信和PC UA
+        WECHAT_UA = (
+            "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/86.0.4240.99 "
+            "XWEB/4317 MMWEBSDK/20220105 Mobile Safari/537.36 "
+            "MicroMessenger/8.0.18.2040(0x28001235) "
+            "Process/toolsmp WeChat/arm64 NetType/WIFI Language/zh_CN ABI/arm64"
+        )
+        PC_UA = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/91.0.4472.124 Safari/537.36"
+        )
+
         try:
             while self.running and self.cur_num < self.config["target_num"]:
-                # 检查是否暂停
                 if self.paused:
                     time.sleep(1)
                     continue
 
-                # 代理切换逻辑
+                # 1. 用滑动条控制微信来源比例
+                # self.config["weixin_ratio"]已实时跟随滑动条
+                use_weixin = random.random() < float(self.config.get("weixin_ratio", 0.5))
+
+                # 2. 配置chromedriver选项
+                options = webdriver.ChromeOptions()
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option("useAutomationExtension", False)
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                ua = WECHAT_UA if use_weixin else PC_UA
+                options.add_argument(f'--user-agent={ua}')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                if self.config["headless"]:
+                    options.add_argument('--headless')
+                else:
+                    options.add_argument(f'--window-position={x},{y}')
+
+                # 3. 代理设置
                 use_ip = self.config.get("use_ip", False)
                 ip_mode = self.config.get("ip_change_mode", "per_submit")
                 ip_batch = self.config.get("ip_change_batch", 5)
                 need_new_proxy = False
-
                 if use_ip:
                     if ip_mode == "per_submit":
                         need_new_proxy = True
                     elif ip_mode == "per_batch":
                         if submit_count % ip_batch == 0:
                             need_new_proxy = True
-
-                options = webdriver.ChromeOptions()
-                if self.config["headless"]:
-                    options.add_argument('--headless')
-                else:
-                    options.add_argument(f'--window-position={x},{y}')
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option("useAutomationExtension", False)
-                options.add_argument('--disable-blink-features=AutomationControlled')
-                options.add_argument(
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-                options.add_argument('--disable-gpu')
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-
                 if use_ip and need_new_proxy:
                     proxy_ip = self.get_new_proxy()
                     if proxy_ip:
@@ -1912,42 +1929,19 @@ class WJXAutoFillApp:
 
                 driver = webdriver.Chrome(options=options)
                 try:
+                    # 4. 设置窗口为手机尺寸以模拟微信端访问
+                    if not self.config["headless"]:
+                        if use_weixin:
+                            driver.set_window_size(375, 812)
+                        else:
+                            driver.set_window_size(1024, 768)
+
+                    logging.info(f"本次作答方式: {'微信来源' if use_weixin else '普通渠道'} (UA已切换)")
+
                     driver.get(self.config["url"])
                     time.sleep(self.config["page_load_delay"])
 
-                    # -------- 微信比率逻辑修正版 --------
-                    use_weixin = random.random() < self.config.get("weixin_ratio", 0)
-                    logging.info(f"本次作答方式: {'微信作答' if use_weixin else '普通作答'}")
-                    if use_weixin:
-                        found_weixin_btn = False
-                        for selector in [
-                            ".weixin-answer", ".btn-weixin", ".wechat-answer", "button.wechat", "a[class*='weixin']"
-                        ]:
-                            try:
-                                weixin_btn = driver.find_element(By.CSS_SELECTOR, selector)
-                                if weixin_btn.is_displayed() and weixin_btn.is_enabled():
-                                    driver.execute_script("arguments[0].scrollIntoView();", weixin_btn)
-                                    weixin_btn.click()
-                                    found_weixin_btn = True
-                                    logging.info("已点击微信作答按钮")
-                                    time.sleep(1)
-                                    break
-                            except Exception:
-                                continue
-                        if not found_weixin_btn:
-                            try:
-                                # 兼容文本按钮
-                                weixin_btn = driver.find_element(By.XPATH,
-                                                                 "//*[contains(text(),'微信作答') or contains(text(),'微信登录')]")
-                                if weixin_btn.is_displayed() and weixin_btn.is_enabled():
-                                    driver.execute_script("arguments[0].scrollIntoView();", weixin_btn)
-                                    weixin_btn.click()
-                                    logging.info("已通过文本点击微信作答按钮")
-                                    time.sleep(1)
-                            except Exception:
-                                logging.info("微信作答按钮未找到或点击失败")
-                    # -------- 微信比率逻辑结束 --------
-
+                    # 填写问卷
                     if self.fill_survey(driver):
                         with self.lock:
                             self.cur_num += 1
@@ -1963,7 +1957,6 @@ class WJXAutoFillApp:
                     logging.error(f"填写问卷时出错: {str(e)}")
                     import traceback
                     traceback.print_exc()
-
                 finally:
                     try:
                         driver.quit()
@@ -1972,7 +1965,7 @@ class WJXAutoFillApp:
 
                 submit_count += 1
 
-                # 智能提交间隔/批量休息机制（按开关启用）
+                # 智能提交间隔/批量休息机制（按原逻辑）
                 if self.config.get("enable_smart_gap", True):
                     if self.running and self.cur_num < self.config["target_num"]:
                         batch_size = self.config.get("batch_size", 0)
@@ -1995,6 +1988,7 @@ class WJXAutoFillApp:
                                     break
                                 time.sleep(1)
                 # 若不开启，直接跳过间隔与批量休息
+
         except Exception as e:
             logging.error(f"运行任务时出错: {str(e)}")
         finally:
