@@ -1855,7 +1855,7 @@ class WJXAutoFillApp:
             messagebox.showerror("错误", f"启动失败: {str(e)}")
 
     def run_filling(self, x=0, y=0):
-        """运行填写任务 - 含智能提交间隔/批量休息开关、代理自动切换"""
+        """运行填写任务 - 含智能提交间隔/批量休息开关、代理自动切换，微信比率修正版"""
         import random
         import time
         from selenium import webdriver
@@ -1915,20 +1915,38 @@ class WJXAutoFillApp:
                     driver.get(self.config["url"])
                     time.sleep(self.config["page_load_delay"])
 
-                    use_weixin = random.random() < self.config["weixin_ratio"]
+                    # -------- 微信比率逻辑修正版 --------
+                    use_weixin = random.random() < self.config.get("weixin_ratio", 0)
+                    logging.info(f"本次作答方式: {'微信作答' if use_weixin else '普通作答'}")
                     if use_weixin:
-                        try:
-                            from selenium.webdriver.common.by import By
-                            from selenium.webdriver.support.ui import WebDriverWait
-                            from selenium.webdriver.support import expected_conditions as EC
-                            weixin_btn = WebDriverWait(driver, 3).until(
-                                EC.element_to_be_clickable((By.CLASS_NAME, "weixin-answer"))
-                            )
-                            driver.execute_script("arguments[0].scrollIntoView();", weixin_btn)
-                            weixin_btn.click()
-                            time.sleep(1)
-                        except:
-                            logging.debug("未找到微信作答按钮或点击失败")
+                        found_weixin_btn = False
+                        for selector in [
+                            ".weixin-answer", ".btn-weixin", ".wechat-answer", "button.wechat", "a[class*='weixin']"
+                        ]:
+                            try:
+                                weixin_btn = driver.find_element(By.CSS_SELECTOR, selector)
+                                if weixin_btn.is_displayed() and weixin_btn.is_enabled():
+                                    driver.execute_script("arguments[0].scrollIntoView();", weixin_btn)
+                                    weixin_btn.click()
+                                    found_weixin_btn = True
+                                    logging.info("已点击微信作答按钮")
+                                    time.sleep(1)
+                                    break
+                            except Exception:
+                                continue
+                        if not found_weixin_btn:
+                            try:
+                                # 兼容文本按钮
+                                weixin_btn = driver.find_element(By.XPATH,
+                                                                 "//*[contains(text(),'微信作答') or contains(text(),'微信登录')]")
+                                if weixin_btn.is_displayed() and weixin_btn.is_enabled():
+                                    driver.execute_script("arguments[0].scrollIntoView();", weixin_btn)
+                                    weixin_btn.click()
+                                    logging.info("已通过文本点击微信作答按钮")
+                                    time.sleep(1)
+                            except Exception:
+                                logging.info("微信作答按钮未找到或点击失败")
+                    # -------- 微信比率逻辑结束 --------
 
                     if self.fill_survey(driver):
                         with self.lock:
