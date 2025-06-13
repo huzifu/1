@@ -49,7 +49,10 @@ DEFAULT_CONFIG = {
     "headless": False,
     "ip_api": "https://service.ipzan.com/core-extract?num=1&minute=1&pool=quality&secret=YOUR_SECRET",
     "num_threads": 4,
-
+    "use_ip": False,
+    "ip_api": "https://service.ipzan.com/core-extract?num=1&minute=1&pool=quality&secret=YOUR_SECRET",
+    "ip_change_mode": "per_submit",  # 新增, 可选: per_submit, per_batch
+    "ip_change_batch": 5,  # 每N份切换, 仅per_batch有效
     # 单选题概率配置
     "single_prob": {
         "1": -1,  # -1表示随机选择
@@ -580,9 +583,18 @@ class WJXAutoFillApp:
         self.ip_entry = ttk.Entry(advanced_frame, width=40)
         self.ip_entry.grid(row=1, column=2, columnspan=3, padx=padx, pady=pady, sticky=tk.EW)
         self.ip_entry.insert(0, self.config["ip_api"])
+        # 新增：代理切换模式
+        ttk.Label(advanced_frame, text="代理切换:").grid(row=2, column=0, padx=padx, pady=pady, sticky=tk.W)
+        self.ip_change_mode = ttk.Combobox(advanced_frame, values=["per_submit", "per_batch"], width=12)
+        self.ip_change_mode.grid(row=2, column=1, padx=padx, pady=pady, sticky=tk.W)
+        self.ip_change_mode.set(self.config.get("ip_change_mode", "per_submit"))
+        ttk.Label(advanced_frame, text="每N份切换:").grid(row=2, column=2, padx=padx, pady=pady, sticky=tk.W)
+        self.ip_change_batch = ttk.Spinbox(advanced_frame, from_=1, to=100, width=5)
+        self.ip_change_batch.grid(row=2, column=3, padx=padx, pady=pady, sticky=tk.W)
+        self.ip_change_batch.set(self.config.get("ip_change_batch", 5))
         self.headless_var = tk.BooleanVar(value=self.config["headless"])
         ttk.Checkbutton(advanced_frame, text="无头模式(不显示浏览器)", variable=self.headless_var).grid(
-            row=2, column=0, padx=padx, pady=pady, sticky=tk.W)
+            row=3, column=0, padx=padx, pady=pady, sticky=tk.W)
 
         # ======== 操作按钮 ========
         button_frame = ttk.Frame(scrollable_frame)
@@ -1790,28 +1802,14 @@ class WJXAutoFillApp:
             messagebox.showerror("错误", f"启动失败: {str(e)}")
 
     def run_filling(self, x=0, y=0):
-        """运行填写任务 - 含智能提交间隔和批量休息机制"""
+        """运行填写任务 - 含智能提交间隔、批量休息、代理自动切换"""
         import random
         import time
         from selenium import webdriver
 
-        options = webdriver.ChromeOptions()
-        if self.config["headless"]:
-            options.add_argument('--headless')
-        else:
-            options.add_argument(f'--window-position={x},{y}')
-
-        # 添加反检测参数
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-
         driver = None
+        submit_count = 0
+
         try:
             while self.running and self.cur_num < self.config["target_num"]:
                 # 检查是否暂停
@@ -1819,25 +1817,48 @@ class WJXAutoFillApp:
                     time.sleep(1)
                     continue
 
-                # 获取代理IP
-                if self.config["use_ip"]:
-                    try:
-                        import requests
-                        response = requests.get(self.config["ip_api"], timeout=10)
-                        ip = response.text.strip()
-                        options.add_argument(f'--proxy-server={ip}')
-                    except Exception as e:
-                        logging.error(f"获取代理IP失败: {str(e)}")
+                # 代理切换逻辑
+                use_ip = self.config.get("use_ip", False)
+                ip_mode = self.config.get("ip_change_mode", "per_submit")
+                ip_batch = self.config.get("ip_change_batch", 5)
+                need_new_proxy = False
+
+                if use_ip:
+                    if ip_mode == "per_submit":
+                        need_new_proxy = True
+                    elif ip_mode == "per_batch":
+                        if submit_count % ip_batch == 0:
+                            need_new_proxy = True
+
+                options = webdriver.ChromeOptions()
+                if self.config["headless"]:
+                    options.add_argument('--headless')
+                else:
+                    options.add_argument(f'--window-position={x},{y}')
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option("useAutomationExtension", False)
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_argument(
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+
+                if use_ip and need_new_proxy:
+                    proxy_ip = self.get_new_proxy()
+                    if proxy_ip:
+                        logging.info(f"使用代理: {proxy_ip}")
+                        options.add_argument(f'--proxy-server={proxy_ip}')
+                    else:
+                        logging.error("本次未获取到有效代理，等待10秒后重试。")
+                        time.sleep(10)
                         continue
 
-                # 创建浏览器实例
                 driver = webdriver.Chrome(options=options)
                 try:
-                    # 访问问卷
                     driver.get(self.config["url"])
                     time.sleep(self.config["page_load_delay"])
 
-                    # 随机决定是否使用微信作答
                     use_weixin = random.random() < self.config["weixin_ratio"]
                     if use_weixin:
                         try:
@@ -1853,7 +1874,6 @@ class WJXAutoFillApp:
                         except:
                             logging.debug("未找到微信作答按钮或点击失败")
 
-                    # 填写问卷
                     if self.fill_survey(driver):
                         with self.lock:
                             self.cur_num += 1
@@ -1876,9 +1896,10 @@ class WJXAutoFillApp:
                     except:
                         pass
 
+                submit_count += 1
+
                 # 智能提交间隔/批量休息机制
                 if self.running and self.cur_num < self.config["target_num"]:
-                    # 批量休息
                     batch_size = self.config.get("batch_size", 0)
                     batch_pause = self.config.get("batch_pause", 0)
                     if batch_size > 0 and self.cur_num % batch_size == 0:
@@ -1888,7 +1909,6 @@ class WJXAutoFillApp:
                                 break
                             time.sleep(1)
                     else:
-                        # 单份随机间隔
                         min_gap = self.config.get("min_submit_gap", 10)
                         max_gap = self.config.get("max_submit_gap", 20)
                         if min_gap > max_gap:
@@ -2692,7 +2712,7 @@ class WJXAutoFillApp:
         result = messagebox.askyesno("确认", "确定要重置所有设置为默认值吗？")
         if result:
             self.config = DEFAULT_CONFIG.copy()
-            # 更新全局设置界面
+            # 全局设置
             self.url_entry.delete(0, tk.END)
             self.url_entry.insert(0, self.config["url"])
             self.target_entry.set(self.config["target_num"])
@@ -2709,19 +2729,22 @@ class WJXAutoFillApp:
             self.submit_delay.set(self.config["submit_delay"])
             self.num_threads.set(self.config["num_threads"])
             self.use_ip_var.set(self.config["use_ip"])
-            self.headless_var.set(self.config["headless"])
             self.ip_entry.delete(0, tk.END)
             self.ip_entry.insert(0, self.config["ip_api"])
-            self.min_submit_gap.set(self.config["min_submit_gap"])
-            self.max_submit_gap.set(self.config["max_submit_gap"])
-            self.batch_size.set(self.config["batch_size"])
-            self.batch_pause.set(self.config["batch_pause"])
+            self.ip_change_mode.set(self.config.get("ip_change_mode", "per_submit"))
+            self.ip_change_batch.set(self.config.get("ip_change_batch", 5))
+            self.headless_var.set(self.config["headless"])
+            # 智能提交间隔/批量休息
+            self.min_submit_gap.set(self.config.get("min_submit_gap", 10))
+            self.max_submit_gap.set(self.config.get("max_submit_gap", 20))
+            self.batch_size.set(self.config.get("batch_size", 5))
+            self.batch_pause.set(self.config.get("batch_pause", 15))
             # 重新加载题型设置
             self.reload_question_settings()
             logging.info("已重置为默认配置")
 
     def save_config(self):
-        """保存当前界面配置到self.config - 含智能提交间隔和批量休息设置"""
+        """保存当前界面配置到self.config - 含智能提交间隔、批量休息、代理切换设置"""
         try:
             # 全局设置
             self.config["url"] = self.url_entry.get().strip()
@@ -2760,8 +2783,13 @@ class WJXAutoFillApp:
                 })
 
             self.config["use_ip"] = self.use_ip_var.get()
-            self.config["headless"] = self.headless_var.get()
             self.config["ip_api"] = self.ip_entry.get().strip()
+            self.config["ip_change_mode"] = self.ip_change_mode.get()
+            try:
+                self.config["ip_change_batch"] = int(self.ip_change_batch.get())
+            except Exception:
+                self.config["ip_change_batch"] = DEFAULT_CONFIG["ip_change_batch"]
+            self.config["headless"] = self.headless_var.get()
 
             # 智能提交间隔和批量休息设置
             try:
@@ -2887,6 +2915,19 @@ class WJXAutoFillApp:
             logging.error(f"保存配置时出错: {str(e)}")
             messagebox.showerror("错误", f"保存配置时出错: {str(e)}")
             return False
+
+    def get_new_proxy(self):
+        """拉取代理IP，返回如 http://ip:port 或 http://user:pwd@ip:port"""
+        try:
+            url = self.config["ip_api"]
+            resp = requests.get(url, timeout=8)
+            ip = resp.text.strip()
+            if ip and "://" not in ip:
+                ip = "http://" + ip
+            return ip
+        except Exception as e:
+            logging.error(f"拉取代理失败: {e}")
+            return None
 
     def random_delay(self, min_time=None, max_time=None):
         """生成随机延迟时间"""
