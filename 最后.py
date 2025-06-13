@@ -1,4 +1,4 @@
-    import tkinter as tk
+import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
@@ -883,13 +883,18 @@ class WJXAutoFillApp:
                         const options = [];
                         const optionSelectors = [
                             '.ulradiocheck label', 
+                            '.wjx-option-label',           // 新增，适配问卷星新版
+                            '.ui-radio', 
+                            '.ui-checkbox', 
+                            'label[for]',                  // 适配常见label
                             '.matrix th', 
                             '.scale-ul li', 
                             '.sort-ul li',
                             'select option',
                             '.option-text',
                             '.option-item',
-                            '.option-label'
+                            '.option-label',
+                            'label'
                         ];
 
                         for (const selector of optionSelectors) {
