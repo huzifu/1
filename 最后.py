@@ -2689,7 +2689,7 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        问卷星多选题自动填写，兼容“其他”选项，兼容复杂结构。
+        问卷星多选题自动填写，强兼容新版结构，优先点击label/div，自动填“其他”文本，保证最少/最多选择数严格生效。
         """
         import random
         import time
@@ -2700,7 +2700,6 @@ class WJXAutoFillApp:
         option_labels = []
         for box in checkboxes:
             label_text = ""
-            # 新版结构通常label在同级div的span，或label[for=]
             try:
                 label_for = box.get_attribute("id")
                 if label_for:
@@ -2711,7 +2710,6 @@ class WJXAutoFillApp:
             except:
                 pass
             if not label_text:
-                # 有些结构label包着input
                 try:
                     label_text = box.find_element(By.XPATH, "../..").text.strip()
                 except:
@@ -2723,46 +2721,99 @@ class WJXAutoFillApp:
             logging.warning(f"多选题{q_num}未找到选项，跳过")
             return
 
-        # 2. 随机选中选项
+        # 2. 读取配置并修正概率长度
         q_key = str(q_num)
-        conf = self.config.get("multiple_prob", {}).get(q_key, [50] * len(checkboxes))
-        min_sel = self.config.get("min_selection", {}).get(q_key, 1)
-        max_sel = self.config.get("max_selection", {}).get(q_key, len(checkboxes))
-        if max_sel > len(checkboxes): max_sel = len(checkboxes)
-        if min_sel > max_sel: min_sel = max_sel
-        probs = conf[:len(checkboxes)] if isinstance(conf, list) else [50] * len(checkboxes)
-        while len(probs) < len(checkboxes): probs.append(50)
-        must = [i for i, p in enumerate(probs) if p >= 100]
-        selected = set(must)
-        for i, p in enumerate(probs):
-            if i not in selected and random.random() * 100 < p:
+        conf = self.config.get("multiple_prob", {}).get(q_key, {"prob": [50] * len(checkboxes), "min_selection": 1,
+                                                                "max_selection": len(checkboxes)})
+        probs = conf.get("prob", [50] * len(checkboxes))
+        min_selection = conf.get("min_selection", 1)
+        max_selection = conf.get("max_selection", len(checkboxes))
+        if max_selection > len(checkboxes): max_selection = len(checkboxes)
+        if min_selection > max_selection: min_selection = max_selection
+        # 修正概率长度
+        probs = probs[:len(checkboxes)] if len(probs) > len(checkboxes) else probs + [50] * (
+                    len(checkboxes) - len(probs))
+
+        # 3. 选项选择逻辑(严格保证最少和最多选择数)
+        must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
+        selected = set(must_indices)
+        for i, prob in enumerate(probs):
+            if i not in selected and random.random() * 100 < prob:
                 selected.add(i)
-        while len(selected) < min_sel:
+        # 补足最少选择数
+        while len(selected) < min_selection:
             left = [i for i in range(len(checkboxes)) if i not in selected]
-            if not left: break
+            if not left:
+                break
             selected.add(random.choice(left))
-        while len(selected) > max_sel:
-            removable = [i for i in selected if i not in must]
-            if not removable: break
+        # 裁剪到最大数
+        while len(selected) > max_selection:
+            removable = [i for i in selected if i not in must_indices]
+            if not removable:
+                break
             selected.remove(random.choice(removable))
 
-        # 3. 勾选选项并判断是否有“其他”
+        # 4. 勾选选项（优先点击label/div，避免element not interactable）
         chose_other = False
         for idx in selected:
             try:
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                      checkboxes[idx])
-                if not checkboxes[idx].is_selected():
-                    checkboxes[idx].click()
-                if "其他" in (option_labels[idx] or "").lower():
+                if idx >= len(checkboxes):
+                    continue
+                input_box = checkboxes[idx]
+                label = None
+                input_id = input_box.get_attribute("id")
+                # 1) label[for=id]
+                if input_id:
+                    try:
+                        label = question.find_element(By.CSS_SELECTOR, f"label[for='{input_id}']")
+                    except:
+                        label = None
+                # 2) 兄弟span
+                if not label:
+                    try:
+                        label = input_box.find_element(By.XPATH, "./following-sibling::*[1]")
+                    except:
+                        label = None
+                # 3) 父div（如.ui-checkbox、option等）
+                if not label:
+                    try:
+                        label = input_box.find_element(By.XPATH, "../..")
+                    except:
+                        label = None
+
+                clicked = False
+                for elem in [label, input_box]:
+                    if elem is not None:
+                        try:
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                                                  elem)
+                            if elem.is_displayed() and elem.is_enabled():
+                                elem.click()
+                                clicked = True
+                                break
+                        except Exception:
+                            continue
+                if not clicked:
+                    try:
+                        driver.execute_script("arguments[0].click();", input_box)
+                        clicked = True
+                    except Exception:
+                        pass
+                if not clicked:
+                    import logging
+                    logging.warning(f"多选题第{q_num}题第{idx + 1}选项无法点击，已跳过")
+                    continue
+
+                text = (option_labels[idx] or "").strip().lower()
+                if "其他" in text or "other" in text:
                     chose_other = True
-                    time.sleep(0.4)
+                    time.sleep(0.6)
             except Exception as e:
                 import logging
                 logging.warning(f"选择选项时出错: {str(e)}")
                 continue
 
-        # 4. 强化“其他”文本框自动填写
+        # 5. 强化“其他”文本框自动填写
         if chose_other:
             other_list = self.config.get("other_texts", {}).get(q_key, [
                 "自动填写内容" + str(random.randint(1, 999)),
@@ -2773,29 +2824,28 @@ class WJXAutoFillApp:
             other_content = random.choice(other_list)
             filled = False
             for _ in range(8):
-                # 新版问卷星“其他”input通常如下几种结构
                 candidates = []
-                # 1. 题目内可见input
                 candidates += [el for el in question.find_elements(By.CSS_SELECTOR, "input[type='text']") if
-                               el.is_displayed()]
-                # 2. textarea
-                candidates += [el for el in question.find_elements(By.CSS_SELECTOR, "textarea") if el.is_displayed()]
-                # 3. placeholder含“其他”
+                               el.is_displayed() and not el.get_attribute("value")]
+                candidates += [el for el in question.find_elements(By.CSS_SELECTOR, "textarea") if
+                               el.is_displayed() and not el.get_attribute("value")]
                 candidates += [el for el in question.find_elements(By.CSS_SELECTOR, "input[placeholder*='其他']") if
-                               el.is_displayed()]
-                # 4. class含OtherText
+                               el.is_displayed() and not el.get_attribute("value")]
                 candidates += [el for el in question.find_elements(By.CSS_SELECTOR, "input.OtherText") if
-                               el.is_displayed()]
-                # 5. label后input
+                               el.is_displayed() and not el.get_attribute("value")]
                 for label in question.find_elements(By.TAG_NAME, "label"):
                     if "其他" in label.text:
                         try:
                             sib = label.find_element(By.XPATH, "./following-sibling::input")
-                            if sib and sib.is_displayed():
+                            if sib and sib.is_displayed() and not sib.get_attribute("value"):
                                 candidates.append(sib)
                         except:
                             pass
-                # 去重
+                if not candidates:
+                    candidates += [el for el in driver.find_elements(By.CSS_SELECTOR, "input.OtherText") if
+                                   el.is_displayed() and not el.get_attribute("value")]
+                    candidates += [el for el in driver.find_elements(By.CSS_SELECTOR, "input[placeholder*='其他']") if
+                                   el.is_displayed() and not el.get_attribute("value")]
                 seen = set()
                 uniq = []
                 for c in candidates:
@@ -2803,11 +2853,8 @@ class WJXAutoFillApp:
                     if h not in seen:
                         seen.add(h)
                         uniq.append(c)
-                # 尝试填写
                 for inp in uniq:
                     try:
-                        if inp.get_attribute("value"):
-                            continue
                         driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
                                               inp)
                         inp.clear()
