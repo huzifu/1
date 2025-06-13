@@ -2551,13 +2551,13 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        问卷星新版2024兼容：多选题自动填写（含“其他”文本），强力反检测，适配 https://www.wjx.cn/vm/PhTMx52.aspx
+        多选题自动填写，支持概率/必选/随机，强力写入“其他”文本（兼容问卷星input.OtherText），
+        控制台输出详细调试信息，便于排查。
         """
         import random, time
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.common.action_chains import ActionChains
 
-        # 1. 勾选多选项（含“其他”），你的选项勾选逻辑可按原有
+        # 1. 查找checkbox选项
         selectors = [
             f"#div{q_num} .ui-checkbox",
             "input[type='checkbox']",
@@ -2583,7 +2583,7 @@ class WJXAutoFillApp:
         if min_selection > max_selection: min_selection = max_selection
         probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-        # 2. 概率选项
+        # 2. 100概率选项必选，其余按概率补齐
         must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
         selected_indices = list(must_indices)
         for i, prob in enumerate(probs):
@@ -2599,7 +2599,7 @@ class WJXAutoFillApp:
                 break
             selected_indices.remove(random.choice(removable))
 
-        # 3. 勾选所有选项并判断是否勾选了“其他”
+        # 3. 勾选所有选项，查找“其他”
         label_elems = question.find_elements(By.CSS_SELECTOR, "label")
         chose_other = False
         for idx in selected_indices:
@@ -2616,66 +2616,42 @@ class WJXAutoFillApp:
                             label_txt = spans[0].text.strip()
                 if "其他" in label_txt or "other" in label_txt.lower():
                     chose_other = True
-                    time.sleep(1.5)  # 问卷星新版必须多等一会儿
+                    time.sleep(1.0)
             except Exception:
                 try:
                     driver.execute_script("arguments[0].click();", options[idx])
                 except Exception:
                     driver.execute_script("arguments[0].checked = true;", options[idx])
 
-        # 4. 强力兼容写“其他”文本
+        # 4. “其他”文本写入（兼容问卷星input.OtherText）
         if chose_other:
-            # 可自定义“其他”内容
-            other_list = self.config.get("other_texts", {}).get(q_key, ["自动填写其它"])
-            other_content = random.choice(other_list) if other_list else "自动填写其它"
-
-            # 问卷星新版只有一个input.OtherText（全局唯一，被反复复用且动态移动）
-            time.sleep(1.0)  # 再等一下确保input渲染
-            boxes = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
-            print("OtherText input count:", len(boxes))
+            # 可根据题号配置“其他”内容
+            other_list = self.config.get("other_texts", {}).get(q_key, ["自动填写内容"])
+            other_content = random.choice(other_list) if other_list else "自动填写内容"
+            time.sleep(0.5)  # 必须等input渲染
+            # 全局查找input.OtherText
+            inputs = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
+            print("OtherText input count:", len(inputs))
             fill_ok = False
-            for box in boxes:
-                if box.is_displayed():
-                    # 1. ActionChains人类逐字输入（最强通用！）
-                    try:
-                        box.click()
-                        try:
-                            box.clear()
-                        except Exception:
-                            pass
-                        actions = ActionChains(driver)
-                        actions.move_to_element(box).click()
-                        for ch in other_content:
-                            actions.send_keys(ch)
-                            actions.perform()
-                            time.sleep(0.07)  # 模拟人手
-                        time.sleep(0.2)
-                        val = box.get_attribute("value")
-                        print(f"ActionChains输入后value: {val}")
-                        if val == other_content:
-                            print("OK: ActionChains成功填入“其他”")
-                            fill_ok = True
-                            break
-                    except Exception as e:
-                        print(f"ActionChains异常: {e}")
-                    # 2. JS兜底（部分环境有效）
-                    if not fill_ok:
-                        driver.execute_script("""
-                            arguments[0].value = arguments[1];
-                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                        """, box, other_content)
-                        time.sleep(0.2)
-                        val = box.get_attribute("value")
-                        print(f"JS兜底后value: {val}")
-                        if val == other_content:
-                            fill_ok = True
-                            print("OK: JS兜底成功填入“其他”")
-                            break
+            for inp in inputs:
+                print(f"id={inp.get_attribute('id')}, 显示={inp.is_displayed()}, value={inp.get_attribute('value')}")
+                if inp.is_displayed():
+                    # 用JS赋值+事件（和你手动console一样）
+                    driver.execute_script("""
+                        arguments[0].value = arguments[1];
+                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                    """, inp, other_content)
+                    time.sleep(0.2)
+                    val = inp.get_attribute("value")
+                    print(f"JS写入后value: {val}")
+                    if val and other_content in val:
+                        print("OK: 已成功写入OtherText:", other_content)
+                        fill_ok = True
+                        break
             if not fill_ok:
-                print(f"【失败】‘其他’文本写入失败，请人工协助或手动填写。")
+                print(f"多选题{q_num}：‘其他’文本写入失败！请贴input的outerHTML给助手排查。")
 
-        # 随机延迟
         self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
 
     def fill_matrix(self, driver, question, q_num):
