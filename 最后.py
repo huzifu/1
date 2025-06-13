@@ -22,7 +22,11 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 from ttkthemes import ThemedTk
 from PIL import Image, ImageTk
 import sv_ttk  # 用于现代主题
-
+import datetime
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 # ================== 配置参数 ==================
 # 默认参数值
 DEFAULT_CONFIG = {
@@ -1063,858 +1067,510 @@ class WJXAutoFillApp:
                     row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
 
     def create_multi_settings(self, frame):
-        """创建多选题设置界面 - 完整修复版本"""
+        """多选题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="多选题配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame, text="• 每个选项概率范围为0-100，表示该选项被选中的独立概率",
-                  font=("Arial", 9)).pack(anchor=tk.W)
-
-        # 创建表格框架
+        ttk.Label(desc_frame, text="多选题配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 每个选项概率范围为0-100，表示该选项被选中的独立概率", font=("Arial", 9)).pack(
+            anchor=tk.W)
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重 - 确保选项配置列有足够空间
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=1)  # 最小选择数
-        table_frame.columnconfigure(3, weight=1)  # 最大选择数
-        table_frame.columnconfigure(4, weight=5)  # 选项概率配置（增加权重）
-        table_frame.columnconfigure(5, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=1)
+        table_frame.columnconfigure(3, weight=1)
+        table_frame.columnconfigure(4, weight=5)
+        table_frame.columnconfigure(5, weight=2)
         headers = ["题号", "题目预览", "最小选择数", "最大选择数", "选项概率配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, config) in enumerate(self.config["multiple_prob"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"多选题 {q_num}")
-
-            # 获取实际选项数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and "prob" in config:
-                option_count = len(config["prob"])
-
-            # 创建题号标签
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
-            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
-            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
-            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 多选题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
+            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
+            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 最小选择数容器
             min_frame = ttk.Frame(table_frame)
             min_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-
-            min_entry = ttk.Spinbox(min_frame, from_=1, to=10, width=4)
+            min_entry = ttk.Spinbox(min_frame, from_=1, to=option_count, width=4)
             min_entry.set(config.get("min_selection", 1))
             min_entry.pack(fill=tk.X, expand=True)
             self.min_selection_entries.append(min_entry)
-
-            # 最小选择说明
-            ttk.Label(min_frame, text="最少选择项数",
-                      font=("Arial", 8), foreground="gray").pack(fill=tk.X, expand=True)
-
-            # 最大选择数容器
+            ttk.Label(min_frame, text="最少选择项数", font=("Arial", 8), foreground="gray").pack(fill=tk.X, expand=True)
             max_frame = ttk.Frame(table_frame)
             max_frame.grid(row=base_row, column=3, padx=padx, pady=pady, sticky=tk.NSEW)
-
-            max_entry = ttk.Spinbox(max_frame, from_=1, to=10, width=4)
-            max_entry.set(config.get("max_selection", option_count if option_count > 0 else 1))
+            max_entry = ttk.Spinbox(max_frame, from_=1, to=option_count, width=4)
+            max_entry.set(config.get("max_selection", option_count))
             max_entry.pack(fill=tk.X, expand=True)
             self.max_selection_entries.append(max_entry)
-
-            # 最大选择说明
-            ttk.Label(max_frame, text="最多选择项数",
-                      font=("Arial", 8), foreground="gray").pack(fill=tk.X, expand=True)
-
-            # 选项配置容器
+            ttk.Label(max_frame, text="最多选择项数", font=("Arial", 8), foreground="gray").pack(fill=tk.X, expand=True)
             option_frame = ttk.Frame(table_frame)
             option_frame.grid(row=base_row, column=4, padx=padx, pady=pady, sticky=tk.NSEW)
-            option_frame.columnconfigure(0, weight=1)  # 添加权重配置
-
+            option_frame.columnconfigure(0, weight=1)
             entry_row = []
-
-            # 添加选项 - 根据实际选项数量生成
             for opt_idx in range(option_count):
-                # 选项容器框架
                 opt_container = ttk.Frame(option_frame)
                 opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)
-
-                # 选项标签
                 opt_label = ttk.Label(opt_container, text=f"选项 {opt_idx + 1}: ", width=8)
                 opt_label.pack(side=tk.LEFT, padx=(0, 5))
-
-                # 概率输入框
                 entry = ttk.Entry(opt_container, width=8)
                 if isinstance(config["prob"], list) and opt_idx < len(config["prob"]):
                     entry.insert(0, config["prob"][opt_idx])
                 else:
-                    entry.insert(0, 50)  # 默认概率50%
+                    entry.insert(0, 50)
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.multi_entries.append(entry_row)
-
-            # 操作按钮容器
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=5, padx=5, pady=5, sticky=tk.NW)
-
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
-
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row1, text="偏左", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("multiple", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row1, text="偏右", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("multiple", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row2, text="随机", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_random("multiple", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row2, text="50%", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_value("multiple", q, e, 50)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["multiple_prob"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=6, sticky='ew', pady=10)
-
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=6,
+                                                                     sticky='ew', pady=10)
 
     def create_text_settings(self, frame):
-        """创建填空题设置界面"""
+        """填空题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="填空题配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 输入多个答案时用逗号分隔\n• 系统会随机选择一个答案填写",
-                  justify=tk.LEFT,
+        ttk.Label(desc_frame, text="填空题配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 输入多个答案时用逗号分隔\n• 系统会随机选择一个答案填写", justify=tk.LEFT,
                   font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 答案配置
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "答案配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, answers) in enumerate(self.config["texts"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"填空题 {q_num}")
-
-            # 创建题号标签和Tooltip
+            # 动态决定有几个空，通常填空题只有一个输入框，特殊问卷可能有多个空
+            option_count = len(self.config["option_texts"].get(q_num, []))
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
             preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
             preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
             preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 填空题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 答案配置容器
             answer_frame = ttk.Frame(table_frame)
             answer_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-
-            # 创建答案输入框
-            entry = ttk.Entry(answer_frame, width=40)
-            entry.pack(fill=tk.X, padx=5, pady=2)
-
-            # 设置初始值（将答案列表转换为逗号分隔的字符串）
-            answer_str = ", ".join(answers)
-            entry.insert(0, answer_str)
-            self.text_entries.append(entry)
-
-            # 操作按钮容器
+            entry_row = []
+            for i in range(option_count):
+                entry = ttk.Entry(answer_frame, width=40)
+                entry.pack(fill=tk.X, padx=5, pady=2)
+                answer_str = ", ".join(answers) if i == 0 else ""
+                entry.insert(0, answer_str)
+                entry_row.append(entry)
+            self.text_entries.append(entry_row)
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 重置按钮
             reset_btn = ttk.Button(btn_frame, text="重置", width=8,
-                                   command=lambda e=entry: self.reset_text_entry(e))
+                                   command=lambda e=entry_row: [ent.delete(0, tk.END) or ent.insert(0, "示例答案") for
+                                                                ent in e])
             reset_btn.pack(pady=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["texts"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
-
-        def reset_text_entry(self, entry):
-            """重置填空题答案为默认值"""
-            entry.delete(0, tk.END)
-            entry.insert(0, "示例答案")
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
 
     def create_multiple_text_settings(self, frame):
-        """创建多项填空设置界面"""
+        """多项填空配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="多项填空配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 每个输入框对应一个空的答案配置\n• 多个答案用逗号分隔",
-                  justify=tk.LEFT,
+        ttk.Label(desc_frame, text="多项填空配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 每个输入框对应一个空的答案配置\n• 多个答案用逗号分隔", justify=tk.LEFT,
                   font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 答案配置
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "答案配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, answers_list) in enumerate(self.config["multiple_texts"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"多项填空 {q_num}")
-
-            # 创建题号标签和Tooltip
+            option_count = len(self.config["option_texts"].get(q_num, []))
+            if option_count == 0:
+                option_count = len(answers_list)
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
             preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
             preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
             preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 多项填空\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 答案配置容器
             answer_frame = ttk.Frame(table_frame)
             answer_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-
             entry_row = []
-
-            # 为每个空创建输入框
-            for i, answers in enumerate(answers_list):
-                # 容器框架
+            for i in range(option_count):
                 field_frame = ttk.Frame(answer_frame)
                 field_frame.pack(fill=tk.X, pady=2)
-
-                # 标签
                 ttk.Label(field_frame, text=f"空 {i + 1}: ", width=6).pack(side=tk.LEFT, padx=(0, 5))
-
-                # 输入框
                 entry = ttk.Entry(field_frame, width=40)
                 entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-                # 设置初始值（将答案列表转换为逗号分隔的字符串）
-                answer_str = ", ".join(answers)
+                answer_str = ", ".join(answers_list[i]) if i < len(answers_list) else ""
                 entry.insert(0, answer_str)
                 entry_row.append(entry)
-
             self.multiple_text_entries.append(entry_row)
-
-            # 操作按钮容器
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 重置按钮
             reset_btn = ttk.Button(btn_frame, text="重置", width=8,
-                                   command=lambda e=entry_row: self.reset_multiple_text_entry(e))
+                                   command=lambda e=entry_row: [ent.delete(0, tk.END) or ent.insert(0, "示例答案") for
+                                                                ent in e])
             reset_btn.pack(pady=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["multiple_texts"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
-
-        # 添加重置方法
-        def reset_multiple_text_entry(self, entries):
-            """重置多项填空答案为默认值"""
-            for entry in entries:
-                entry.delete(0, tk.END)
-                entry.insert(0, "示例答案")
-
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
     def create_matrix_settings(self, frame):
-        """创建矩阵题设置界面 - 完整修复版本"""
+        """矩阵题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="矩阵题配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 输入 -1 表示随机选择\n" +
-                       "• 输入正数表示选项的相对权重",
-                  justify=tk.LEFT,
-                  font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
+        ttk.Label(desc_frame, text="矩阵题配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 输入 -1 表示随机选择\n• 输入正数表示选项的相对权重", font=("Arial", 9)).pack(
+            anchor=tk.W, padx=5)
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 选项配置（增加权重）
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "选项配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["matrix_prob"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"矩阵题 {q_num}")
-
-            # 获取实际选项数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and isinstance(probs, list):
-                option_count = len(probs)
-
-            # 创建题号标签和Tooltip
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
-            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
-            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
-            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 矩阵题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
+            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
+            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 选项配置容器
             option_frame = ttk.Frame(table_frame)
             option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-            option_frame.columnconfigure(0, weight=1)  # 添加权重配置
-
+            option_frame.columnconfigure(0, weight=1)
             entry_row = []
-
-            # 添加选项 - 根据实际选项数量生成
             for opt_idx in range(option_count):
-                # 选项容器框架
                 opt_container = ttk.Frame(option_frame)
                 opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)
-
-                # 选项标签
                 opt_label = ttk.Label(opt_container, text=f"选项 {opt_idx + 1}: ", width=8)
                 opt_label.pack(side=tk.LEFT, padx=(0, 5))
-
-                # 权重输入框
                 entry = ttk.Entry(opt_container, width=8)
                 if isinstance(probs, list) and opt_idx < len(probs):
                     entry.insert(0, str(probs[opt_idx]))
                 elif probs == -1:
                     entry.insert(0, "-1")
                 else:
-                    entry.insert(0, "1")  # 默认权重为1
+                    entry.insert(0, "1")
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.matrix_entries.append(entry_row)
-
-            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
-
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row1, text="偏左", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("matrix", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row1, text="偏右", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("matrix", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row2, text="随机", width=6,
-                       command=lambda q=q_num, e=entry_row: self.set_question_random("matrix", q, e)).pack(
-                side=tk.LEFT, padx=2)
-
+                       command=lambda q=q_num, e=entry_row: self.set_question_random("matrix", q, e)).pack(side=tk.LEFT,
+                                                                                                           padx=2)
             ttk.Button(btn_row2, text="平均", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_average("matrix", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["matrix_prob"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
 
     def create_reorder_settings(self, frame):
-        """创建排序题设置界面"""
+        """排序题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="排序题配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 每个位置的概率表示该位置被选中的相对权重\n" +
-                       "• 概率越高，该位置被选中的几率越大",
-                  justify=tk.LEFT,
+        ttk.Label(desc_frame, text="排序题配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 每个位置的概率表示该位置被选中的相对权重\n• 概率越高，该位置被选中的几率越大",
                   font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 位置概率配置
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "位置概率配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["reorder_prob"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"排序题 {q_num}")
-
-            # 获取实际选项数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and isinstance(probs, list):
-                option_count = len(probs)
-
-            # 创建题号标签和Tooltip
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
-            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
-            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
-            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 排序题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
+            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
+            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 位置配置容器
             option_frame = ttk.Frame(table_frame)
             option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-            option_frame.columnconfigure(0, weight=1)  # 添加权重配置
-
+            option_frame.columnconfigure(0, weight=1)
             entry_row = []
-
-            # 添加位置 - 根据实际位置数量生成
             for pos_idx in range(option_count):
-                # 位置容器框架
                 pos_container = ttk.Frame(option_frame)
                 pos_container.grid(row=pos_idx, column=0, sticky=tk.W, pady=2)
-
-                # 位置标签
                 pos_label = ttk.Label(pos_container, text=f"位置 {pos_idx + 1}: ", width=8)
                 pos_label.pack(side=tk.LEFT, padx=(0, 5))
-
-                # 权重输入框
                 entry = ttk.Entry(pos_container, width=8)
                 if isinstance(probs, list) and pos_idx < len(probs):
                     entry.insert(0, str(probs[pos_idx]))
                 else:
-                    entry.insert(0, f"{1 / option_count:.2f}")  # 平均概率
+                    entry.insert(0, f"{1 / option_count:.2f}")
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.reorder_entries.append(entry_row)
-
-            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
-
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row1, text="偏前", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("reorder", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row1, text="偏后", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("reorder", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row2, text="随机", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_random("reorder", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row2, text="平均", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_average("reorder", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["reorder_prob"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
 
     def create_droplist_settings(self, frame):
-        """创建下拉框设置界面"""
+        """下拉框题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="下拉框配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 每个选项的概率表示该选项被选中的相对权重\n" +
-                       "• 概率越高，该选项被选中的几率越大",
-                  justify=tk.LEFT,
+        ttk.Label(desc_frame, text="下拉框配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 每个选项的概率表示该选项被选中的相对权重\n• 概率越高，该选项被选中的几率越大",
                   font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 选项概率配置
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "选项概率配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["droplist_prob"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"下拉框题 {q_num}")
-
-            # 获取实际选项数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and isinstance(probs, list):
-                option_count = len(probs)
-
-            # 创建题号标签和Tooltip
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
-            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
-            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
-            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 下拉框题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
+            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
+            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 选项配置容器
             option_frame = ttk.Frame(table_frame)
             option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-            option_frame.columnconfigure(0, weight=1)  # 添加权重配置
-
+            option_frame.columnconfigure(0, weight=1)
             entry_row = []
-
-            # 添加选项 - 根据实际选项数量生成
             for opt_idx in range(option_count):
-                # 选项容器框架
                 opt_container = ttk.Frame(option_frame)
                 opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)
-
-                # 选项标签
                 opt_label = ttk.Label(opt_container, text=f"选项 {opt_idx + 1}: ", width=8)
                 opt_label.pack(side=tk.LEFT, padx=(0, 5))
-
-                # 权重输入框
                 entry = ttk.Entry(opt_container, width=8)
                 if isinstance(probs, list) and opt_idx < len(probs):
                     entry.insert(0, str(probs[opt_idx]))
                 else:
-                    entry.insert(0, "0.3")  # 默认概率
+                    entry.insert(0, "0.3")
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.droplist_entries.append(entry_row)
-
-            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
-
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row1, text="偏前", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("droplist", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row1, text="偏后", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("droplist", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row2, text="随机", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_random("droplist", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row2, text="平均", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_average("droplist", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 添加分隔行
             if row_idx < len(self.config["droplist_prob"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
 
     def create_scale_settings(self, frame):
-        """创建量表题设置界面 - 完整修复版本"""
+        """量表题配置界面 动态生成输入框"""
         padx, pady = 8, 5
-
-        # 说明标签容器
         desc_frame = ttk.Frame(frame)
         desc_frame.pack(fill=tk.X, padx=padx, pady=pady)
-
-        # 主要说明
-        ttk.Label(desc_frame, text="量表题配置说明：",
-                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
-
-        ttk.Label(desc_frame,
-                  text="• 输入概率值表示该刻度被选中的相对概率\n" +
-                       "• 概率越高，该刻度被选中的几率越大",
-                  justify=tk.LEFT,
+        ttk.Label(desc_frame, text="量表题配置说明：", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(desc_frame, text="• 输入概率值表示该刻度被选中的相对概率\n• 概率越高，该刻度被选中的几率越大",
                   font=("Arial", 9)).pack(anchor=tk.W, padx=5)
-
-        # 创建表格框架
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 设置列权重
-        table_frame.columnconfigure(0, weight=1)  # 题号
-        table_frame.columnconfigure(1, weight=3)  # 题目预览
-        table_frame.columnconfigure(2, weight=5)  # 刻度概率配置（增加权重）
-        table_frame.columnconfigure(3, weight=2)  # 操作
-
-        # 表头
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=3)
+        table_frame.columnconfigure(2, weight=5)
+        table_frame.columnconfigure(3, weight=2)
         headers = ["题号", "题目预览", "刻度概率配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
-
-        # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["scale_prob"].items(), start=1):
             base_row = row_idx
-
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"量表题 {q_num}")
-
-            # 获取实际选项数量
             option_count = len(self.config["option_texts"].get(q_num, []))
-            if option_count == 0 and isinstance(probs, list):
-                option_count = len(probs)
-
-            # 创建题号标签和Tooltip
+            if option_count == 0:
+                option_count = 1
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加题目预览
-            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
-            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
-            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
-
-            # 添加Tooltips
             tooltip_text = f"题目类型: 量表题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
+            preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
+            preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
+            preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
-
-            # 选项配置容器
             option_frame = ttk.Frame(table_frame)
             option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
-            option_frame.columnconfigure(0, weight=1)  # 添加权重配置
-
+            option_frame.columnconfigure(0, weight=1)
             entry_row = []
-
-            # 添加选项 - 根据实际选项数量生成
             for opt_idx in range(option_count):
-                # 选项容器框架
                 opt_container = ttk.Frame(option_frame)
                 opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)
-
-                # 选项标签
                 opt_label = ttk.Label(opt_container, text=f"刻度 {opt_idx + 1}: ", width=8)
                 opt_label.pack(side=tk.LEFT, padx=(0, 5))
-
-                # 权重输入框
                 entry = ttk.Entry(opt_container, width=8)
                 if isinstance(probs, list) and opt_idx < len(probs):
                     entry.insert(0, str(probs[opt_idx]))
                 else:
-                    entry.insert(0, "0.2")  # 默认权重为0.2
+                    entry.insert(0, "0.2")
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.scale_entries.append(entry_row)
-
-            # 操作按钮
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
-
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
-
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row1, text="偏左", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("scale", "left", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
             ttk.Button(btn_row1, text="偏右", width=6,
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("scale", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
-
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
-
             ttk.Button(btn_row2, text="随机", width=6,
-                       command=lambda q=q_num, e=entry_row: self.set_question_random("scale", q, e)).pack(
-                side=tk.LEFT, padx=2)
-
+                       command=lambda q=q_num, e=entry_row: self.set_question_random("scale", q, e)).pack(side=tk.LEFT,
+                                                                                                          padx=2)
             ttk.Button(btn_row2, text="平均", width=6,
-                       command=lambda q=q_num, e=entry_row: self.set_question_average("scale", q, e)).pack(
-                side=tk.LEFT, padx=2)
-
-            # 添加分隔行
+                       command=lambda q=q_num, e=entry_row: self.set_question_average("scale", q, e)).pack(side=tk.LEFT,
+                                                                                                           padx=2)
             if row_idx < len(self.config["scale_prob"]):
-                ttk.Separator(table_frame, orient='horizontal').grid(
-                    row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
+                ttk.Separator(table_frame, orient='horizontal').grid(row=base_row + 1, column=0, columnspan=4,
+                                                                     sticky='ew', pady=10)
 
     def set_question_bias(self, q_type, direction, q_num, entries):
         """为单个题目设置偏左或偏右分布"""
@@ -2328,8 +1984,12 @@ class WJXAutoFillApp:
             return False
 
     def submit_survey(self, driver):
-        """增强的问卷提交逻辑"""
-        max_retries = 3  # 减少重试次数
+        """增强的问卷提交逻辑，不保存截图，仅详细日志"""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.common.exceptions import TimeoutException
+        max_retries = 3
         retry_count = 0
         success = False
 
@@ -2338,65 +1998,66 @@ class WJXAutoFillApp:
                 # 记录提交前URL用于后续比对
                 original_url = driver.current_url
 
-                # 多种定位提交按钮的方式
+                # 多种方式查找提交按钮
                 submit_selectors = [
-                    "#submit_button",
-                    ".submit-btn",
-                    ".submitbutton",
-                    "a[id*='submit']",
-                    "button[type='submit']",
-                    "input[type='submit']",
-                    "div.submit",
-                    ".btn-submit",
-                    ".btn-success",
-                    "#ctlNext",
-                    "#submit_button",
-                    "#submit_btn",
-                    "#next_button"
+                    "#submit_button", ".submit-btn", ".submitbutton", "a[id*='submit']",
+                    "button[type='submit']", "input[type='submit']",
+                    "div.submit", ".btn-submit", ".btn-success", "#ctlNext", "#submit_btn", "#next_button",
+                    "button", "a", "input"
                 ]
-
                 submit_btn = None
                 for selector in submit_selectors:
                     try:
-                        # 增加等待时间，确保按钮可点击
-                        submit_btn = WebDriverWait(driver, 10).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                        )
-                        if submit_btn:
-                            logging.debug(f"使用选择器找到提交按钮: {selector}")
+                        submit_btn = driver.find_element(By.CSS_SELECTOR, selector)
+                        if submit_btn.is_displayed() and submit_btn.is_enabled():
+                            logging.info(f"通过选择器找到提交按钮: {selector}")
                             break
-                    except Exception as e:
-                        logging.debug(f"使用选择器 {selector} 未找到提交按钮: {str(e)}")
+                    except Exception:
                         continue
-
                 if not submit_btn:
-                    # 尝试通过文本查找提交按钮
                     try:
-                        submit_btn = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'提交')]"))
-                        )
-                        logging.debug("通过文本找到提交按钮")
-                    except:
-                        logging.error("找不到提交按钮")
-                        return False
+                        submit_btn = driver.find_element(By.XPATH, "//*[contains(text(),'提交')]")
+                        logging.info("通过XPATH文本找到提交按钮")
+                    except Exception:
+                        pass
 
-                # 滚动到按钮并高亮
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", submit_btn)
-                # 使用复杂点击序列绕过检测
-                ActionChains(driver) \
-                    .move_to_element(submit_btn) \
-                    .pause(0.3) \
-                    .click_and_hold() \
-                    .pause(0.2) \
-                    .release() \
-                    .perform()
+                if submit_btn:
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                                          submit_btn)
+                    try:
+                        submit_btn.click()
+                        logging.info("click()点击提交按钮成功")
+                    except Exception as e:
+                        logging.warning(f"click()点击失败，尝试JS点击: {e}")
+                        try:
+                            driver.execute_script("arguments[0].click();", submit_btn)
+                            logging.info("JS click()点击提交按钮成功")
+                        except Exception as ee:
+                            logging.error(f"JS click()点击也失败: {ee}")
+                            continue
+                    # 可选：再尝试触发submit事件
+                    try:
+                        driver.execute_script(
+                            "arguments[0].dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));",
+                            submit_btn)
+                    except Exception:
+                        pass
+                    import time
+                    time.sleep(self.config["submit_delay"])
+                else:
+                    logging.error("找不到提交按钮")
+                    return False
 
-                logging.info("已尝试提交问卷")
+                # 检查页面是否有错误提示
+                error_msgs = driver.find_elements(By.CSS_SELECTOR,
+                                                  ".msg, .errorMsg, .alert-danger, .div_error_msg, .div_error, .error, .errmsg")
+                found_error = False
+                for em in error_msgs:
+                    if em.is_displayed() and em.text.strip():
+                        logging.error(f"提交后页面错误提示：{em.text}")
+                        found_error = True
 
-                # 增加提交后的延迟
-                time.sleep(self.config["submit_delay"])
-
-                # 等待页面变化 - 检测URL或DOM变化
+                # 等待页面变化
                 try:
                     WebDriverWait(driver, 10).until(
                         lambda d: d.current_url != original_url or
@@ -2421,6 +2082,9 @@ class WJXAutoFillApp:
                     retry_count += 1
                     continue
 
+                if found_error:
+                    logging.warning("页面出现错误提示，提交失败")
+
                 logging.warning(f"提交可能失败，准备重试 ({retry_count + 1}/{max_retries})")
                 retry_count += 1
 
@@ -2428,17 +2092,16 @@ class WJXAutoFillApp:
                 try:
                     driver.refresh()
                     WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, ".field.ui-field-contain"))
+                        EC.presence_of_element_located((By.CSS_SELECTOR, ".field.ui-field-contain, .div_question"))
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logging.error(f"刷新页面时出错: {e}")
 
             except Exception as e:
                 logging.error(f"提交出错: {str(e)}")
                 retry_count += 1
 
         return success
-
     def verify_submission(self, driver):
         """多维度验证提交是否成功"""
         # 1. 检查URL特征
