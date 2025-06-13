@@ -2551,8 +2551,7 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        多选题自动填写，支持概率/必选/随机，强力写入“其他”文本（兼容问卷星input.OtherText），
-        控制台输出详细调试信息，便于排查。
+        多选题自动填写（含“其他”文本框填充，兼容问卷星），只填当前题目下的“其他”输入框。
         """
         import random, time
         from selenium.webdriver.common.by import By
@@ -2583,7 +2582,7 @@ class WJXAutoFillApp:
         if min_selection > max_selection: min_selection = max_selection
         probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-        # 2. 100概率选项必选，其余按概率补齐
+        # 2. 确定要勾选哪些
         must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
         selected_indices = list(must_indices)
         for i, prob in enumerate(probs):
@@ -2599,9 +2598,10 @@ class WJXAutoFillApp:
                 break
             selected_indices.remove(random.choice(removable))
 
-        # 3. 勾选所有选项，查找“其他”
+        # 3. 勾选所有选项，同时记录“其他”选项的index
         label_elems = question.find_elements(By.CSS_SELECTOR, "label")
         chose_other = False
+        other_index = None
         for idx in selected_indices:
             try:
                 driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
@@ -2616,6 +2616,7 @@ class WJXAutoFillApp:
                             label_txt = spans[0].text.strip()
                 if "其他" in label_txt or "other" in label_txt.lower():
                     chose_other = True
+                    other_index = idx
                     time.sleep(1.0)
             except Exception:
                 try:
@@ -2623,34 +2624,39 @@ class WJXAutoFillApp:
                 except Exception:
                     driver.execute_script("arguments[0].checked = true;", options[idx])
 
-        # 4. “其他”文本写入（兼容问卷星input.OtherText）
+        # 4. 只填当前题目下的“其他”文本框（而不是全局）
         if chose_other:
-            # 可根据题号配置“其他”内容
+            # 获取“其他”内容
             other_list = self.config.get("other_texts", {}).get(q_key, ["自动填写内容"])
             other_content = random.choice(other_list) if other_list else "自动填写内容"
-            time.sleep(0.5)  # 必须等input渲染
-            # 全局查找input.OtherText
-            inputs = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
-            print("OtherText input count:", len(inputs))
-            fill_ok = False
-            for inp in inputs:
-                print(f"id={inp.get_attribute('id')}, 显示={inp.is_displayed()}, value={inp.get_attribute('value')}")
+            # 等待文本框渲染
+            time.sleep(0.5)
+            # 只在当前question下找input.OtherText
+            other_inputs = question.find_elements(By.CSS_SELECTOR, "input.OtherText")
+            for inp in other_inputs:
                 if inp.is_displayed():
-                    # 用JS赋值+事件（和你手动console一样）
-                    driver.execute_script("""
-                        arguments[0].value = arguments[1];
-                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                    """, inp, other_content)
-                    time.sleep(0.2)
-                    val = inp.get_attribute("value")
-                    print(f"JS写入后value: {val}")
-                    if val and other_content in val:
-                        print("OK: 已成功写入OtherText:", other_content)
-                        fill_ok = True
-                        break
-            if not fill_ok:
-                print(f"多选题{q_num}：‘其他’文本写入失败！请贴input的outerHTML给助手排查。")
+                    try:
+                        inp.clear()
+                        inp.send_keys(other_content)
+                    except Exception:
+                        # send_keys不行则用JS赋值
+                        driver.execute_script("""
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                        """, inp, other_content)
+                    break  # 一般只填一个
+            else:
+                # 兜底：如果没找到，尝试全局填一下（极端情况）
+                driver.execute_script("""
+                    document.querySelectorAll('input.OtherText').forEach(function(input){
+                        if (input.offsetParent !== null) {
+                            input.value = arguments[0];
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    });
+                """, other_content)
 
         self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
 
