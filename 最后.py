@@ -975,53 +975,47 @@ class WJXAutoFillApp:
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # 设置表格列权重，确保输入框区域可扩展 - 增加权重比例
         table_frame.columnconfigure(0, weight=1)  # 题号列
         table_frame.columnconfigure(1, weight=3)  # 题目预览列
-        table_frame.columnconfigure(2, weight=8)  # 选项权重配置列（增加权重） ★ 修复点
+        table_frame.columnconfigure(2, weight=8)  # 选项权重配置列（增加权重）
         table_frame.columnconfigure(3, weight=2)  # 操作列
 
-        # 表头 - 添加列宽设置
+        # 表头
         headers = ["题号", "题目预览", "选项权重配置", "操作"]
         for col, header in enumerate(headers):
             header_label = ttk.Label(table_frame, text=header, font=("Arial", 9, "bold"))
             header_label.grid(row=0, column=col, padx=padx, pady=pady, sticky=tk.W)
 
-        # 添加题目行
         for row_idx, (q_num, probs) in enumerate(self.config["single_prob"].items(), start=1):
             base_row = row_idx
-            # 获取题目文本
             q_text = self.config["question_texts"].get(q_num, f"单选题 {q_num}")
-            # 获取实际选项数量
+
             option_count = len(self.config["option_texts"].get(q_num, []))
             if option_count == 0 and isinstance(probs, list):
                 option_count = len(probs)
+            # 修复关键：保证至少有一个输入框出现
+            if option_count == 0:
+                option_count = 1
 
-            # 创建题号标签和Tooltip
             q_label = ttk.Label(table_frame, text=f"第{q_num}题", cursor="hand2", font=("Arial", 10))
             q_label.grid(row=base_row, column=0, padx=padx, pady=pady, sticky=tk.NW)
-            # 添加Tooltip
             tooltip_text = f"题目类型: 单选题\n\n{q_text}"
             tooltip = ToolTip(q_label, tooltip_text, wraplength=400)
             self.tooltips.append(tooltip)
 
-            # 添加题目预览
             preview_text = (q_text[:30] + '...') if len(q_text) > 30 else q_text
             preview_label = ttk.Label(table_frame, text=preview_text, width=25, wraplength=200)
             preview_label.grid(row=base_row, column=1, padx=padx, pady=pady, sticky=tk.NW)
             preview_tooltip = ToolTip(preview_label, tooltip_text, wraplength=400)
             self.tooltips.append(preview_tooltip)
 
-            # 选项配置容器 - 确保正确布局
             option_frame = ttk.Frame(table_frame)
-            option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)  # ★ 修复点
+            option_frame.grid(row=base_row, column=2, padx=padx, pady=pady, sticky=tk.NSEW)
 
             entry_row = []
-
-            # 生成选项输入框 - 修复布局问题
             for opt_idx in range(option_count):
                 opt_container = ttk.Frame(option_frame)
-                opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)  # ★ 修复点
+                opt_container.grid(row=opt_idx, column=0, sticky=tk.W, pady=2)
 
                 opt_label = ttk.Label(opt_container, text=f"选项 {opt_idx + 1}: ", width=8)
                 opt_label.pack(side=tk.LEFT, padx=(0, 5))
@@ -1032,21 +1026,17 @@ class WJXAutoFillApp:
                 elif probs == -1:
                     entry.insert(0, "-1")
                 else:
-                    entry.insert(0, "1")  # 默认权重为1
+                    entry.insert(0, "1")
                 entry.pack(side=tk.LEFT, padx=(0, 10))
                 entry_row.append(entry)
-
             self.single_entries.append(entry_row)
 
-            # 操作按钮 - 布局优化
             btn_frame = ttk.Frame(table_frame)
             btn_frame.grid(row=base_row, column=3, padx=5, pady=5, sticky=tk.NW)
 
-            # 创建按钮网格
             btn_grid = ttk.Frame(btn_frame)
             btn_grid.pack(fill=tk.BOTH, expand=True)
 
-            # 第一行按钮
             btn_row1 = ttk.Frame(btn_grid)
             btn_row1.pack(fill=tk.X, pady=2)
             ttk.Button(btn_row1, text="偏左", width=6,
@@ -1056,7 +1046,6 @@ class WJXAutoFillApp:
                        command=lambda q=q_num, e=entry_row: self.set_question_bias("single", "right", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 第二行按钮
             btn_row2 = ttk.Frame(btn_grid)
             btn_row2.pack(fill=tk.X, pady=2)
             ttk.Button(btn_row2, text="随机", width=6,
@@ -1066,7 +1055,6 @@ class WJXAutoFillApp:
                        command=lambda q=q_num, e=entry_row: self.set_question_average("single", q, e)).pack(
                 side=tk.LEFT, padx=2)
 
-            # 添加分隔行
             if row_idx < len(self.config["single_prob"]):
                 ttk.Separator(table_frame, orient='horizontal').grid(
                     row=base_row + 1, column=0, columnspan=4, sticky='ew', pady=10)
