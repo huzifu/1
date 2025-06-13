@@ -651,108 +651,57 @@ class WJXAutoFillApp:
             logging.error(f"处理解析的题目时出错: {str(e)}")
 
     def create_question_settings(self):
-        """创建题型设置界面 - 完整修复版本"""
-        # 清除旧的Tooltip引用
-        self.tooltips = []
-
-        # 清空原有输入框列表
-        self.single_entries = []
-        self.multi_entries = []
-        self.min_selection_entries = []
-        self.max_selection_entries = []
-        self.matrix_entries = []
-        self.text_entries = []
-        self.multiple_text_entries = []
-        self.reorder_entries = []
-        self.droplist_entries = []
-        self.scale_entries = []
-
-        # 确保配置键存在
-        required_keys = [
-            'single_prob', 'multiple_prob', 'matrix_prob',
-            'texts', 'multiple_texts', 'reorder_prob',
-            'droplist_prob', 'scale_prob'
-        ]
-        for key in required_keys:
-            if key not in self.config:
-                self.config[key] = {}
-
-        # 创建滚动框架 - 修复布局问题
+        """创建题型设置界面 - 推荐每次完整重建Canvas, Frame, Notebook等所有结构"""
+        # 创建滚动框架
         self.question_canvas = tk.Canvas(self.question_frame)
-        self.question_scrollbar = ttk.Scrollbar(
-            self.question_frame,
-            orient="vertical",
-            command=self.question_canvas.yview
-        )
-
-        # 创建可滚动框架
+        self.question_scrollbar = ttk.Scrollbar(self.question_frame, orient="vertical",
+                                                command=self.question_canvas.yview)
         self.scrollable_question_frame = ttk.Frame(self.question_canvas)
-
-        # 配置滚动区域
         self.scrollable_question_frame.bind(
             "<Configure>",
-            lambda e: self.question_canvas.configure(
-                scrollregion=self.question_canvas.bbox("all")
-            )
+            lambda e: self.question_canvas.configure(scrollregion=self.question_canvas.bbox("all"))
         )
-
-        # 将可滚动框架添加到画布
-        self.question_canvas.create_window(
-            (0, 0),
-            window=self.scrollable_question_frame,
-            anchor="nw"
-        )
+        self.question_canvas.create_window((0, 0), window=self.scrollable_question_frame, anchor="nw")
         self.question_canvas.configure(yscrollcommand=self.question_scrollbar.set)
-
-        # 布局滚动区域 - 修复：确保正确打包
         self.question_scrollbar.pack(side="right", fill="y")
         self.question_canvas.pack(side="left", fill="both", expand=True)
-        # 动态创建题型标签页
+
+        # 创建Notebook（每次都新建）
+        self.question_notebook = ttk.Notebook(self.scrollable_question_frame)
+        self.question_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # 题型tab配置
         question_types = [
             ('single_prob', "单选题", self.create_single_settings),
             ('multiple_prob', "多选题", self.create_multi_settings),
             ('matrix_prob', "矩阵题", self.create_matrix_settings),
-            # 修复：将 'texts' 的创建方法改为 create_text_settings -> 改为现有的 create_text_settings 方法
-            ('texts', "填空题", self.create_text_settings),  # 改为现有的方法
+            ('texts', "填空题", self.create_text_settings),
             ('multiple_texts', "多项填空", self.create_multiple_text_settings),
             ('reorder_prob', "排序题", self.create_reorder_settings),
             ('droplist_prob', "下拉框", self.create_droplist_settings),
             ('scale_prob', "量表题", self.create_scale_settings)
         ]
-
-        # 创建Notebook - 修复：添加到可滚动框架
-        self.question_notebook = ttk.Notebook(self.scrollable_question_frame)
-        self.question_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # 添加题型标签页 - 即使为空也创建
         for config_key, label_text, create_func in question_types:
             count = len(self.config[config_key])
-
-            # 创建框架 - 修复：即使没有题目也创建标签页
             frame = ttk.Frame(self.question_notebook)
             self.question_notebook.add(frame, text=f"{label_text}({count})")
-
-            # 添加说明标签
             desc_frame = ttk.Frame(frame)
             desc_frame.pack(fill=tk.X, padx=8, pady=5)
-
             if count == 0:
-                ttk.Label(desc_frame,
-                          text=f"暂无{label_text}题目",
-                          font=("Arial", 10, "italic"),
+                ttk.Label(desc_frame, text=f"暂无{label_text}题目", font=("Arial", 10, "italic"),
                           foreground="gray").pack(pady=20)
             else:
-                create_func(frame)  # 调用具体题型创建方法
+                create_func(frame)
 
         # 添加提示
         tip_frame = ttk.Frame(self.scrollable_question_frame)
         tip_frame.pack(fill=tk.X, pady=10)
         ttk.Label(tip_frame, text="提示: 鼠标悬停在题号上可查看题目内容",
                   style='Warning.TLabel').pack()
-
-        # 确保滚动区域正确计算
         self.scrollable_question_frame.update_idletasks()
         self.question_canvas.configure(scrollregion=self.question_canvas.bbox("all"))
+
+
     def update_ratio_display(self, event=None):
         """更新微信作答比率显示"""
         ratio = self.ratio_scale.get()
@@ -2113,13 +2062,11 @@ class WJXAutoFillApp:
             logging.debug(f"更新控件字体时出错: {str(e)}")
 
     def reload_question_settings(self):
-        """重新加载题型设置界面 - 修复版本"""
-        # 只清除滚动区域，保留question_notebook
+        """重新加载题型设置界面 - 彻底销毁重建所有控件"""
+        # 销毁所有子控件（包括Canvas/Scrollbar/Frame/Notebook）
         for widget in self.question_frame.winfo_children():
-            if widget != self.question_notebook:
-                widget.destroy()
-
-        # 重置所有输入框列表
+            widget.destroy()
+        # 清空输入框和tooltip引用
         self.single_entries = []
         self.multi_entries = []
         self.min_selection_entries = []
@@ -2130,14 +2077,10 @@ class WJXAutoFillApp:
         self.reorder_entries = []
         self.droplist_entries = []
         self.scale_entries = []
-
-        # 清除旧的Tooltip引用
         self.tooltips = []
-
-        # 重新创建题型设置
+        # 重新创建所有内容
         self.create_question_settings()
-
-        # 确保界面更新
+        # 确保界面刷新
         self.root.update_idletasks()
 
     def start_filling(self):
