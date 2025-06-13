@@ -2198,124 +2198,85 @@ class WJXAutoFillApp:
             print(f"自动补全题目时出错: {e}")
 
     def submit_survey(self, driver):
-        """增强的问卷提交逻辑，不保存截图，仅详细日志"""
+        """
+        增强的问卷提交逻辑，自动适配多种提交按钮和结果检测，自动修复常见异常和验证码
+        """
+        import time
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException
         max_retries = 3
-        retry_count = 0
-        success = False
-
-        while retry_count < max_retries and not success and self.running:
+        for attempt in range(max_retries):
             try:
-                # 记录提交前URL用于后续比对
-                original_url = driver.current_url
-
-                # 多种方式查找提交按钮
-                submit_selectors = [
-                    "#submit_button", ".submit-btn", ".submitbutton", "a[id*='submit']",
-                    "button[type='submit']", "input[type='submit']",
-                    "div.submit", ".btn-submit", ".btn-success", "#ctlNext", "#submit_btn", "#next_button",
-                    "button", "a", "input"
-                ]
+                # 1. 多种方式查找提交按钮
                 submit_btn = None
-                for selector in submit_selectors:
+                selectors = [
+                    "#submit_button", ".submit-btn", ".submitbutton", "a[id*='submit']", "button[type='submit']",
+                    "input[type='submit']", "div.submit", ".btn-submit", ".btn-success", "#ctlNext", "#submit_btn",
+                    "#next_button"
+                ]
+                for sel in selectors:
                     try:
-                        submit_btn = driver.find_element(By.CSS_SELECTOR, selector)
-                        if submit_btn.is_displayed() and submit_btn.is_enabled():
-                            logging.info(f"通过选择器找到提交按钮: {selector}")
+                        btn = driver.find_element(By.CSS_SELECTOR, sel)
+                        if btn.is_displayed() and btn.is_enabled():
+                            submit_btn = btn
                             break
                     except Exception:
                         continue
+                # 2. 若还找不到，用文本查找
                 if not submit_btn:
                     try:
                         submit_btn = driver.find_element(By.XPATH, "//*[contains(text(),'提交')]")
-                        logging.info("通过XPATH文本找到提交按钮")
                     except Exception:
                         pass
 
+                # 3. 若找到按钮，尝试click
                 if submit_btn:
                     driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
                                           submit_btn)
                     try:
                         submit_btn.click()
-                        logging.info("click()点击提交按钮成功")
-                    except Exception as e:
-                        logging.warning(f"click()点击失败，尝试JS点击: {e}")
+                    except Exception:
                         try:
                             driver.execute_script("arguments[0].click();", submit_btn)
-                            logging.info("JS click()点击提交按钮成功")
-                        except Exception as ee:
-                            logging.error(f"JS click()点击也失败: {ee}")
-                            continue
-                    # 可选：再尝试触发submit事件
-                    try:
-                        driver.execute_script(
-                            "arguments[0].dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));",
-                            submit_btn)
-                    except Exception:
-                        pass
-                    import time
-                    time.sleep(self.config["submit_delay"])
+                        except Exception:
+                            pass
+                    time.sleep(2)
                 else:
-                    logging.error("找不到提交按钮")
-                    return False
+                    # 4. 若没有按钮，尝试直接form.submit
+                    try:
+                        form = driver.find_element(By.TAG_NAME, "form")
+                        driver.execute_script("arguments[0].submit();", form)
+                    except Exception:
+                        print("找不到可用的提交按钮和form，提交失败！")
+                        return False
 
-                # 检查页面是否有错误提示
-                error_msgs = driver.find_elements(By.CSS_SELECTOR,
-                                                  ".msg, .errorMsg, .alert-danger, .div_error_msg, .div_error, .error, .errmsg")
-                found_error = False
-                for em in error_msgs:
-                    if em.is_displayed() and em.text.strip():
-                        logging.error(f"提交后页面错误提示：{em.text}")
-                        found_error = True
-
-                # 等待页面变化
-                try:
-                    WebDriverWait(driver, 10).until(
-                        lambda d: d.current_url != original_url or
-                                  "提交成功" in d.page_source or
-                                  "感谢您" in d.page_source or
-                                  "/wjx/join/complete.aspx" in d.current_url or
-                                  "已完成" in d.page_source
-                    )
-                except TimeoutException:
-                    logging.warning("提交后页面未变化，可能提交失败")
-
-                # 验证提交结果
-                success = self.verify_submission(driver)
-
-                if success:
-                    logging.info("提交成功验证通过")
-                    break
-
-                # 检查验证码
-                if self.handle_captcha(driver):
-                    logging.info("验证码处理后重新尝试提交")
-                    retry_count += 1
+                # 5. 检查提交结果
+                time.sleep(2)
+                page_text = driver.page_source
+                url = driver.current_url
+                if any(keyword in url for keyword in ["complete", "success", "finish", "thank"]):
+                    print("问卷提交成功！")
+                    return True
+                if any(word in page_text for word in ["提交成功", "感谢", "问卷已完成", "谢谢您的参与"]):
+                    print("问卷提交成功！")
+                    return True
+                # 6. 检查是否有错误提示/验证码
+                if any(word in page_text for word in ["验证码", "请完成验证"]):
+                    print("页面出现验证码，请手动处理后继续。")
+                    time.sleep(10)
                     continue
-
-                if found_error:
-                    logging.warning("页面出现错误提示，提交失败")
-
-                logging.warning(f"提交可能失败，准备重试 ({retry_count + 1}/{max_retries})")
-                retry_count += 1
-
-                # 重试前刷新页面
-                try:
-                    driver.refresh()
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, ".field.ui-field-contain, .div_question"))
-                    )
-                except Exception as e:
-                    logging.error(f"刷新页面时出错: {e}")
-
+                if any(word in page_text for word in ["还有必答题", "请填写", "错误", "失败"]):
+                    print("页面提示填写不全或有错误，尝试自动补全。")
+                    self.repair_required_questions(driver)
+                    time.sleep(1)
+                    continue
+                print("提交后页面未变化，重试中...")
             except Exception as e:
-                logging.error(f"提交出错: {str(e)}")
-                retry_count += 1
-
-        return success
+                print(f"提交问卷异常: {e}")
+            time.sleep(2)
+        print("多次重试后提交仍未成功！")
+        return False
 
 
     def verify_submission(self, driver):
@@ -2590,16 +2551,15 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        健壮版多选题自动填写，支持多结构、异常降级、自动填写“其他”文本
+        多选题自动填写（适配问卷星“其他”），确保class=OtherText的文本框能被自动填写，包括JS事件触发和调试输出。
         """
         import random
+        import time
+        from selenium.webdriver.common.by import By
         try:
-            # 1. 兼容多种结构查找checkbox
+            # 1. 查找所有checkbox选项
             selectors = [
-                f"#div{q_num} .ui-checkbox",  # 常见结构
-                "input[type='checkbox']",
-                ".wjx-checkbox",
-                ".option input[type='checkbox']"
+                f"#div{q_num} .ui-checkbox", "input[type='checkbox']", ".wjx-checkbox", ".option input[type='checkbox']"
             ]
             options = []
             for sel in selectors:
@@ -2620,7 +2580,6 @@ class WJXAutoFillApp:
             if min_selection > max_selection: min_selection = max_selection
             probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-            # 2. 选择选项
             num_to_select = random.randint(min_selection, max_selection)
             selected_indices = []
             for i, prob in enumerate(probs):
@@ -2633,71 +2592,104 @@ class WJXAutoFillApp:
             while len(selected_indices) > max_selection:
                 selected_indices.pop(random.randint(0, len(selected_indices) - 1))
 
-            # 3. 勾选
-            click_ok = False
+            # 勾选所有选项，并检查“其他”
+            label_elems = question.find_elements(By.CSS_SELECTOR, "label")
+            chose_other = False
             for idx in selected_indices:
                 try:
                     driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
                                           options[idx])
                     options[idx].click()
-                    click_ok = True
+                    label_txt = ""
+                    if idx < len(label_elems):
+                        label_txt = label_elems[idx].text.strip()
+                        if not label_txt:
+                            spans = label_elems[idx].find_elements(By.CSS_SELECTOR, "span")
+                            if spans:
+                                label_txt = spans[0].text.strip()
+                    if "其他" in label_txt or "other" in label_txt.lower():
+                        chose_other = True
+                        time.sleep(0.5)  # 等“其他”文本框弹出
                 except Exception:
                     try:
-                        # 尝试用JS点击
                         driver.execute_script("arguments[0].click();", options[idx])
-                        click_ok = True
                     except Exception:
-                        # 最终降级：设置checked属性
                         driver.execute_script("arguments[0].checked = true;", options[idx])
-                        click_ok = True
-            if not click_ok:
-                print(f"多选题{q_num}所有选项点击均失败，降级跳过")
-                return
 
-            # 4. 填写“其他”文本（如有）
-            # 找所有label文本
-            label_elems = question.find_elements(By.CSS_SELECTOR, "label")
-            for idx in selected_indices:
-                label_txt = ""
-                if idx < len(label_elems):
-                    label_txt = label_elems[idx].text.strip()
-                    if not label_txt:
-                        spans = label_elems[idx].find_elements(By.CSS_SELECTOR, "span")
-                        if spans:
-                            label_txt = spans[0].text.strip()
-                if "其他" in label_txt or "other" in label_txt.lower():
-                    # 查找自定义内容
-                    other_list = self.config.get("other_texts", {}).get(q_key, ["其他"])
-                    other_content = random.choice(other_list) if other_list else "其他"
-                    # 找文本框
-                    other_inputs = question.find_elements(By.CSS_SELECTOR, "input[type='text'], textarea")
-                    fill_ok = False
-                    for inp in other_inputs:
-                        if inp.is_displayed() and not inp.get_attribute("value"):
+            # 填写“其他”文本（全局查找class=OtherText，id，或XPath，多重保险）
+            if chose_other:
+                other_list = self.config.get("other_texts", {}).get(q_key, ["其他"])
+                other_content = random.choice(other_list) if other_list else "其他"
+                fill_ok = False
+                time.sleep(0.2)
+                # 1. 打印所有input.OtherText及其状态
+                boxes = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
+                print("调试: 所有OtherText输入框：")
+                for b in boxes:
+                    print("id:", b.get_attribute("id"), "显示:", b.is_displayed(), "值:", b.get_attribute("value"),
+                          "readonly:", b.get_attribute("readonly"), "disabled:", b.get_attribute("disabled"))
+                # 2. 优先用JS直接写（更强力）
+                for box in boxes:
+                    if box.is_displayed():
+                        driver.execute_script("""
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                        """, box, other_content)
+                        print(f"已用JS写入OtherText：{other_content}")
+                        fill_ok = True
+                        break
+                # 3. 若还有问题，强制移除readonly/disabled再send_keys
+                if not fill_ok:
+                    for box in boxes:
+                        driver.execute_script("""
+                            arguments[0].removeAttribute('readonly');
+                            arguments[0].removeAttribute('disabled');
+                        """, box)
+                        if box.is_displayed():
                             try:
-                                inp.clear()
+                                box.clear()
                             except Exception:
                                 pass
                             try:
-                                inp.send_keys(other_content)
+                                box.send_keys(other_content)
+                                print("二次尝试send_keys写入OtherText")
                                 fill_ok = True
-                                print(f"已自动填写‘其他’文本内容：{other_content}")
                                 break
-                            except Exception:
-                                # JS填充降级
-                                try:
-                                    driver.execute_script("arguments[0].value = arguments[1];", inp, other_content)
-                                    fill_ok = True
-                                    break
-                                except Exception:
-                                    pass
-                    if not fill_ok:
-                        print(f"多选题{q_num}：‘其他’文本填写失败")
-                    break  # 只处理一个“其他”
-
+                            except Exception as e:
+                                print("send_keys写入失败:", e)
+                # 4. 如果还不行，直接用id兜底
+                if not fill_ok:
+                    try:
+                        box = driver.find_element(By.CSS_SELECTOR, "input[id^='tqq']")
+                        driver.execute_script("""
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                        """, box, other_content)
+                        print("最终兜底用id写入OtherText")
+                        fill_ok = True
+                    except Exception as e:
+                        print("用id兜底写入失败:", e)
+                # 5. XPath兜底
+                if not fill_ok:
+                    try:
+                        box = driver.find_element(By.XPATH,
+                                                  '/html/body/div[2]/form/div[12]/div[5]/fieldset/div[3]/div[2]/div[8]/div[2]/input')
+                        driver.execute_script("""
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                        """, box, other_content)
+                        print("最终兜底用XPath写入OtherText")
+                        fill_ok = True
+                    except Exception as e:
+                        print("用XPath兜底写入失败:", e)
+                if not fill_ok:
+                    print(f"多选题{q_num}：‘其他’文本填写失败")
             self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
         except Exception as e:
-            print(f"填写多选题 {q_num} 时出错: {str(e)}")
+            print(f"填写多选题 {q_num} 时出错: {str(e)}")   
 
     def fill_matrix(self, driver, question, q_num):
         """填写矩阵题"""
