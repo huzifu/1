@@ -2551,145 +2551,108 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        多选题自动填写（适配问卷星“其他”），确保class=OtherText的文本框能被自动填写，包括JS事件触发和调试输出。
+        多选题自动填写，支持100概率必选、强力‘其他’文本填充（JS/事件/属性移除），带详细调试输出。
         """
-        import random
-        import time
+        import random, time
         from selenium.webdriver.common.by import By
-        try:
-            # 1. 查找所有checkbox选项
-            selectors = [
-                f"#div{q_num} .ui-checkbox", "input[type='checkbox']", ".wjx-checkbox", ".option input[type='checkbox']"
-            ]
-            options = []
-            for sel in selectors:
-                options = question.find_elements(By.CSS_SELECTOR, sel)
-                if options:
-                    break
-            if not options:
-                print(f"多选题{q_num}未找到有效选项，自动跳过")
-                return
 
-            q_key = str(q_num)
-            config = self.config["multiple_prob"].get(q_key, {"prob": [50] * len(options), "min_selection": 1,
-                                                              "max_selection": len(options)})
-            probs = config.get("prob", [50] * len(options))
-            min_selection = config.get("min_selection", 1)
-            max_selection = config.get("max_selection", len(options))
-            if max_selection > len(options): max_selection = len(options)
-            if min_selection > max_selection: min_selection = max_selection
-            probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
+        # 1. 查找所有checkbox选项（兼容多结构）
+        selectors = [
+            f"#div{q_num} .ui-checkbox",
+            "input[type='checkbox']",
+            ".wjx-checkbox",
+            ".option input[type='checkbox']"
+        ]
+        options = []
+        for sel in selectors:
+            options = question.find_elements(By.CSS_SELECTOR, sel)
+            if options:
+                break
+        if not options:
+            print(f"多选题{q_num}未找到有效选项，自动跳过")
+            return
 
-            num_to_select = random.randint(min_selection, max_selection)
-            selected_indices = []
-            for i, prob in enumerate(probs):
-                if random.random() * 100 < prob:
-                    selected_indices.append(i)
-            while len(selected_indices) < min_selection:
-                left = [i for i in range(len(options)) if i not in selected_indices]
-                if not left: break
-                selected_indices.append(random.choice(left))
-            while len(selected_indices) > max_selection:
-                selected_indices.pop(random.randint(0, len(selected_indices) - 1))
+        q_key = str(q_num)
+        config = self.config["multiple_prob"].get(q_key, {"prob": [50] * len(options), "min_selection": 1,
+                                                          "max_selection": len(options)})
+        probs = config.get("prob", [50] * len(options))
+        min_selection = config.get("min_selection", 1)
+        max_selection = config.get("max_selection", len(options))
+        if max_selection > len(options): max_selection = len(options)
+        if min_selection > max_selection: min_selection = max_selection
+        probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-            # 勾选所有选项，并检查“其他”
-            label_elems = question.find_elements(By.CSS_SELECTOR, "label")
-            chose_other = False
-            for idx in selected_indices:
+        # 2. 必选项逻辑（100概率永远不被剔除）
+        must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
+        selected_indices = list(must_indices)
+        for i, prob in enumerate(probs):
+            if i not in selected_indices and random.random() * 100 < prob:
+                selected_indices.append(i)
+        while len(selected_indices) < min_selection:
+            left = [i for i in range(len(options)) if i not in selected_indices]
+            if not left: break
+            selected_indices.append(random.choice(left))
+        while len(selected_indices) > max_selection:
+            removable = [i for i in selected_indices if i not in must_indices]
+            if not removable:
+                break
+            selected_indices.remove(random.choice(removable))
+
+        # 3. 勾选所有选项
+        label_elems = question.find_elements(By.CSS_SELECTOR, "label")
+        chose_other = False
+        for idx in selected_indices:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                                      options[idx])
+                options[idx].click()
+                label_txt = ""
+                if idx < len(label_elems):
+                    label_txt = label_elems[idx].text.strip()
+                    if not label_txt:
+                        spans = label_elems[idx].find_elements(By.CSS_SELECTOR, "span")
+                        if spans:
+                            label_txt = spans[0].text.strip()
+                if "其他" in label_txt or "other" in label_txt.lower():
+                    chose_other = True
+                    time.sleep(1.0)  # 增加等待，确保input渲染
+            except Exception:
                 try:
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                          options[idx])
-                    options[idx].click()
-                    label_txt = ""
-                    if idx < len(label_elems):
-                        label_txt = label_elems[idx].text.strip()
-                        if not label_txt:
-                            spans = label_elems[idx].find_elements(By.CSS_SELECTOR, "span")
-                            if spans:
-                                label_txt = spans[0].text.strip()
-                    if "其他" in label_txt or "other" in label_txt.lower():
-                        chose_other = True
-                        time.sleep(0.5)  # 等“其他”文本框弹出
+                    driver.execute_script("arguments[0].click();", options[idx])
                 except Exception:
-                    try:
-                        driver.execute_script("arguments[0].click();", options[idx])
-                    except Exception:
-                        driver.execute_script("arguments[0].checked = true;", options[idx])
+                    driver.execute_script("arguments[0].checked = true;", options[idx])
 
-            # 填写“其他”文本（全局查找class=OtherText，id，或XPath，多重保险）
-            if chose_other:
-                other_list = self.config.get("other_texts", {}).get(q_key, ["其他"])
-                other_content = random.choice(other_list) if other_list else "其他"
-                fill_ok = False
-                time.sleep(0.2)
-                # 1. 打印所有input.OtherText及其状态
-                boxes = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
-                print("调试: 所有OtherText输入框：")
-                for b in boxes:
-                    print("id:", b.get_attribute("id"), "显示:", b.is_displayed(), "值:", b.get_attribute("value"),
-                          "readonly:", b.get_attribute("readonly"), "disabled:", b.get_attribute("disabled"))
-                # 2. 优先用JS直接写（更强力）
-                for box in boxes:
-                    if box.is_displayed():
-                        driver.execute_script("""
-                            arguments[0].value = arguments[1];
-                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                        """, box, other_content)
-                        print(f"已用JS写入OtherText：{other_content}")
-                        fill_ok = True
-                        break
-                # 3. 若还有问题，强制移除readonly/disabled再send_keys
-                if not fill_ok:
-                    for box in boxes:
-                        driver.execute_script("""
-                            arguments[0].removeAttribute('readonly');
-                            arguments[0].removeAttribute('disabled');
-                        """, box)
-                        if box.is_displayed():
-                            try:
-                                box.clear()
-                            except Exception:
-                                pass
-                            try:
-                                box.send_keys(other_content)
-                                print("二次尝试send_keys写入OtherText")
-                                fill_ok = True
-                                break
-                            except Exception as e:
-                                print("send_keys写入失败:", e)
-                # 4. 如果还不行，直接用id兜底
-                if not fill_ok:
-                    try:
-                        box = driver.find_element(By.CSS_SELECTOR, "input[id^='tqq']")
-                        driver.execute_script("""
-                            arguments[0].value = arguments[1];
-                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                        """, box, other_content)
-                        print("最终兜底用id写入OtherText")
-                        fill_ok = True
-                    except Exception as e:
-                        print("用id兜底写入失败:", e)
-                # 5. XPath兜底
-                if not fill_ok:
-                    try:
-                        box = driver.find_element(By.XPATH,
-                                                  '/html/body/div[2]/form/div[12]/div[5]/fieldset/div[3]/div[2]/div[8]/div[2]/input')
-                        driver.execute_script("""
-                            arguments[0].value = arguments[1];
-                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                        """, box, other_content)
-                        print("最终兜底用XPath写入OtherText")
-                        fill_ok = True
-                    except Exception as e:
-                        print("用XPath兜底写入失败:", e)
-                if not fill_ok:
-                    print(f"多选题{q_num}：‘其他’文本填写失败")
-            self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
-        except Exception as e:
-            print(f"填写多选题 {q_num} 时出错: {str(e)}")   
+        # 4. 填写“其他”文本（全局强制写入，JS+事件）
+        if chose_other:
+            other_list = self.config.get("other_texts", {}).get(q_key, ["其他"])
+            other_content = random.choice(other_list) if other_list else "其他"
+            time.sleep(0.5)
+            boxes = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
+            print("OtherText input count:", len(boxes))
+            for b in boxes:
+                print("OtherText input id:", b.get_attribute("id"),
+                      "显示:", b.is_displayed(),
+                      "值:", b.get_attribute("value"),
+                      "readonly:", b.get_attribute("readonly"),
+                      "disabled:", b.get_attribute("disabled"))
+            fill_ok = False
+            for box in boxes:
+                if box.is_displayed():
+                    driver.execute_script("""
+                        arguments[0].removeAttribute('readonly');
+                        arguments[0].removeAttribute('disabled');
+                        arguments[0].focus();
+                        arguments[0].value = arguments[1];
+                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                    """, box, other_content)
+                    print("已用JS写入OtherText:", other_content)
+                    fill_ok = True
+                    break
+            if not fill_ok:
+                print(f"多选题{q_num}：‘其他’文本填写失败！页面结构/JS阻止，可检查input.OtherText属性或手动测试。")
+
+        self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
 
     def fill_matrix(self, driver, question, q_num):
         """填写矩阵题"""
