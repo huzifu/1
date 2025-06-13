@@ -2551,12 +2551,13 @@ class WJXAutoFillApp:
 
     def fill_multiple(self, driver, question, q_num):
         """
-        多选题自动填写，支持100概率必选、强力‘其他’文本填充（JS/事件/属性移除），带详细调试输出。
+        问卷星新版2024兼容：多选题自动填写（含“其他”文本），强力反检测，适配 https://www.wjx.cn/vm/PhTMx52.aspx
         """
         import random, time
         from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.action_chains import ActionChains
 
-        # 1. 查找所有checkbox选项（兼容多结构）
+        # 1. 勾选多选项（含“其他”），你的选项勾选逻辑可按原有
         selectors = [
             f"#div{q_num} .ui-checkbox",
             "input[type='checkbox']",
@@ -2573,8 +2574,8 @@ class WJXAutoFillApp:
             return
 
         q_key = str(q_num)
-        config = self.config["multiple_prob"].get(q_key, {"prob": [50] * len(options), "min_selection": 1,
-                                                          "max_selection": len(options)})
+        config = self.config.get("multiple_prob", {}).get(q_key, {"prob": [50] * len(options), "min_selection": 1,
+                                                                  "max_selection": len(options)})
         probs = config.get("prob", [50] * len(options))
         min_selection = config.get("min_selection", 1)
         max_selection = config.get("max_selection", len(options))
@@ -2582,7 +2583,7 @@ class WJXAutoFillApp:
         if min_selection > max_selection: min_selection = max_selection
         probs = probs[:len(options)] if len(probs) > len(options) else probs + [50] * (len(options) - len(probs))
 
-        # 2. 必选项逻辑（100概率永远不被剔除）
+        # 2. 概率选项
         must_indices = [i for i, prob in enumerate(probs) if prob >= 100]
         selected_indices = list(must_indices)
         for i, prob in enumerate(probs):
@@ -2598,7 +2599,7 @@ class WJXAutoFillApp:
                 break
             selected_indices.remove(random.choice(removable))
 
-        # 3. 勾选所有选项
+        # 3. 勾选所有选项并判断是否勾选了“其他”
         label_elems = question.find_elements(By.CSS_SELECTOR, "label")
         chose_other = False
         for idx in selected_indices:
@@ -2615,43 +2616,66 @@ class WJXAutoFillApp:
                             label_txt = spans[0].text.strip()
                 if "其他" in label_txt or "other" in label_txt.lower():
                     chose_other = True
-                    time.sleep(1.0)  # 增加等待，确保input渲染
+                    time.sleep(1.5)  # 问卷星新版必须多等一会儿
             except Exception:
                 try:
                     driver.execute_script("arguments[0].click();", options[idx])
                 except Exception:
                     driver.execute_script("arguments[0].checked = true;", options[idx])
 
-        # 4. 填写“其他”文本（全局强制写入，JS+事件）
+        # 4. 强力兼容写“其他”文本
         if chose_other:
-            other_list = self.config.get("other_texts", {}).get(q_key, ["其他"])
-            other_content = random.choice(other_list) if other_list else "其他"
-            time.sleep(0.5)
+            # 可自定义“其他”内容
+            other_list = self.config.get("other_texts", {}).get(q_key, ["自动填写其它"])
+            other_content = random.choice(other_list) if other_list else "自动填写其它"
+
+            # 问卷星新版只有一个input.OtherText（全局唯一，被反复复用且动态移动）
+            time.sleep(1.0)  # 再等一下确保input渲染
             boxes = driver.find_elements(By.CSS_SELECTOR, "input.OtherText")
             print("OtherText input count:", len(boxes))
-            for b in boxes:
-                print("OtherText input id:", b.get_attribute("id"),
-                      "显示:", b.is_displayed(),
-                      "值:", b.get_attribute("value"),
-                      "readonly:", b.get_attribute("readonly"),
-                      "disabled:", b.get_attribute("disabled"))
             fill_ok = False
             for box in boxes:
                 if box.is_displayed():
-                    driver.execute_script("""
-                        arguments[0].removeAttribute('readonly');
-                        arguments[0].removeAttribute('disabled');
-                        arguments[0].focus();
-                        arguments[0].value = arguments[1];
-                        arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                    """, box, other_content)
-                    print("已用JS写入OtherText:", other_content)
-                    fill_ok = True
-                    break
+                    # 1. ActionChains人类逐字输入（最强通用！）
+                    try:
+                        box.click()
+                        try:
+                            box.clear()
+                        except Exception:
+                            pass
+                        actions = ActionChains(driver)
+                        actions.move_to_element(box).click()
+                        for ch in other_content:
+                            actions.send_keys(ch)
+                            actions.perform()
+                            time.sleep(0.07)  # 模拟人手
+                        time.sleep(0.2)
+                        val = box.get_attribute("value")
+                        print(f"ActionChains输入后value: {val}")
+                        if val == other_content:
+                            print("OK: ActionChains成功填入“其他”")
+                            fill_ok = True
+                            break
+                    except Exception as e:
+                        print(f"ActionChains异常: {e}")
+                    # 2. JS兜底（部分环境有效）
+                    if not fill_ok:
+                        driver.execute_script("""
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                            arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                        """, box, other_content)
+                        time.sleep(0.2)
+                        val = box.get_attribute("value")
+                        print(f"JS兜底后value: {val}")
+                        if val == other_content:
+                            fill_ok = True
+                            print("OK: JS兜底成功填入“其他”")
+                            break
             if not fill_ok:
-                print(f"多选题{q_num}：‘其他’文本填写失败！页面结构/JS阻止，可检查input.OtherText属性或手动测试。")
+                print(f"【失败】‘其他’文本写入失败，请人工协助或手动填写。")
 
+        # 随机延迟
         self.random_delay(*self.config.get("per_question_delay", (1.0, 3.0)))
 
     def fill_matrix(self, driver, question, q_num):
